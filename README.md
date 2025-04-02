@@ -81,6 +81,36 @@ A Socket.IO based server for the multiplayer labyrinth game.
    docker run -p 5000:5000 labyrinth-server
    ```
 
+## GitHub Actions Automated Deployment
+
+This project includes a GitHub Actions workflow that automatically:
+1. Builds the Docker image
+2. Pushes it to Docker Hub
+3. Deploys to an AWS server
+
+### Setup Requirements
+
+To use the automated deployment, you need to add the following secrets to your GitHub repository:
+
+1. `DOCKERHUB_USERNAME`: Your Docker Hub username
+2. `DOCKERHUB_TOKEN`: A Docker Hub access token
+3. `AWS_HOST`: Your AWS server's IP address or domain name
+4. `AWS_USERNAME`: SSH username for your AWS server
+5. `AWS_SSH_KEY`: SSH private key for authentication
+6. `APP_DIR`: Directory on the AWS server where the app should be deployed
+
+### How It Works
+
+1. When you push to the main/master branch, the workflow automatically triggers
+2. The Docker image is built and pushed to Docker Hub
+3. The workflow connects to your AWS server via SSH
+4. It creates or updates the docker-compose.yml file
+5. It pulls the latest image and restarts the container
+
+### Manual Deployment
+
+You can also manually trigger the workflow from the "Actions" tab in your GitHub repository.
+
 ## Connecting Clients
 
 The server will be accessible at:
