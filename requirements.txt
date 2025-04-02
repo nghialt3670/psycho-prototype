@@ -1,4 +1,5 @@
-pygame==2.5.2
-python-socketio==5.10.0
+python-socketio==5.8.0
 eventlet==0.33.3
+pygame==2.5.0
 requests==2.31.0
+python-dotenv==1.0.0

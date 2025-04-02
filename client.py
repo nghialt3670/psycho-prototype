@@ -4,6 +4,14 @@ import sys
 import time
 import threading
 import json
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Get server address from environment variables or use default
+SERVER_URL = os.getenv('SERVER_URL', 'http://localhost:5000')
 
 # Initialize Pygame
 pygame.init()
@@ -105,7 +113,7 @@ def reset_game_state():
 
 def connect_to_server():
     try:
-        sio.connect('http://localhost:5000')
+        sio.connect(SERVER_URL)
         return True
     except Exception as e:
         print(f"Connection error: {e}")

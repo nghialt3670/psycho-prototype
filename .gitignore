@@ -22,3 +22,6 @@ Thumbs.db
 .vscode/
 *.sublime-project
 *.sublime-workspace 
+
+# Environment variables
+.env
