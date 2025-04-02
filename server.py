@@ -389,7 +389,6 @@ def get_next_player_position(room_name):
 
 @sio.event
 def connect(sid, environ):
-    print('Client connected:', sid)
     players[sid] = {
         'x': 0,  # Will be set when joining a room
         'y': 0,
@@ -572,5 +571,4 @@ def get_game_state(sid, data=None):
 
 if __name__ == '__main__':
     port = 5000
-    print(f"Starting server on port {port}")
     wsgi.server(eventlet.listen(('', port)), app) 
