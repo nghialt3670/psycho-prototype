@@ -112,6 +112,8 @@ To connect from other machines, make sure to update the `.env` file on the clien
 SERVER_URL=http://<your-ip-address>:5000
 ```
 
+**Important:** Always use `http://` and not `https://` in the SERVER_URL since this server doesn't have SSL configured.
+
 ## Troubleshooting
 
 - If the server doesn't start, check Docker logs:
@@ -120,3 +122,12 @@ SERVER_URL=http://<your-ip-address>:5000
   ```
 
 - Make sure port 5000 is not already in use on your system.
+
+- If you see SSL errors like `[SSL: WRONG_VERSION_NUMBER] wrong version number`, make sure your client's `.env` file uses `http://` and not `https://` in the SERVER_URL:
+  ```
+  # Correct
+  SERVER_URL=http://3.27.193.248:5000
+  
+  # Wrong (will cause SSL errors)
+  SERVER_URL=https://3.27.193.248:5000
+  ```
