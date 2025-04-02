@@ -27,8 +27,8 @@ player_colors = [
 
 # Wall settings
 WALL_WIDTH = 20
-MAP_WIDTH = 800
-MAP_HEIGHT = 600
+MAP_WIDTH = 1600  # 800 * 2
+MAP_HEIGHT = 1200  # 600 * 2
 
 # Player settings
 PLAYER_SIZE = 40
@@ -46,7 +46,7 @@ PLAYER_STARTS = [
 ]
 
 def generate_walls():
-    """Generate a labyrinth-style maze of walls"""
+    """Generate a labyrinth-style maze of walls for a larger map"""
     walls = []
     
     # Wall thickness
@@ -87,101 +87,227 @@ def generate_walls():
         'height': MAP_HEIGHT - 2 * margin
     })
     
-    # Create internal maze walls
+    # Create internal maze walls - now with more walls for a larger map
     
-    # Horizontal internal walls
-    # Row 1
+    # Horizontal internal walls - Row 1
     walls.append({
         'x': margin + 100,
         'y': margin + 80,
-        'width': 200,
+        'width': 300,
         'height': thickness
     })
     
     walls.append({
-        'x': margin + 400,
+        'x': margin + 500,
         'y': margin + 80,
-        'width': 200,
+        'width': 500,
+        'height': thickness
+    })
+    
+    walls.append({
+        'x': margin + 1200,
+        'y': margin + 80,
+        'width': 300,
         'height': thickness
     })
     
     # Row 2
     walls.append({
-        'x': margin + 150,
+        'x': margin + 200,
         'y': margin + 200,
-        'width': 300,
+        'width': 400,
+        'height': thickness
+    })
+    
+    walls.append({
+        'x': margin + 800,
+        'y': margin + 200,
+        'width': 400,
         'height': thickness
     })
     
     # Row 3
     walls.append({
-        'x': margin + 80,
-        'y': margin + 320,
-        'width': 150,
+        'x': margin + 100,
+        'y': margin + 350,
+        'width': 250,
         'height': thickness
     })
     
     walls.append({
-        'x': margin + 350,
-        'y': margin + 320,
-        'width': 250,
+        'x': margin + 500,
+        'y': margin + 350,
+        'width': 400,
+        'height': thickness
+    })
+    
+    walls.append({
+        'x': margin + 1050,
+        'y': margin + 350,
+        'width': 450,
         'height': thickness
     })
     
     # Row 4
     walls.append({
-        'x': margin + 200,
-        'y': margin + 420,
+        'x': margin + 300,
+        'y': margin + 500,
+        'width': 500,
+        'height': thickness
+    })
+    
+    walls.append({
+        'x': margin + 900,
+        'y': margin + 500,
         'width': 400,
         'height': thickness
     })
     
-    # Vertical internal walls
-    # Column 1
+    # Row 5
     walls.append({
         'x': margin + 150,
+        'y': margin + 650,
+        'width': 350,
+        'height': thickness
+    })
+    
+    walls.append({
+        'x': margin + 700,
+        'y': margin + 650,
+        'width': 450,
+        'height': thickness
+    })
+    
+    walls.append({
+        'x': margin + 1200,
+        'y': margin + 650,
+        'width': 300,
+        'height': thickness
+    })
+    
+    # Row 6
+    walls.append({
+        'x': margin + 250,
+        'y': margin + 800,
+        'width': 550,
+        'height': thickness
+    })
+    
+    walls.append({
+        'x': margin + 950,
+        'y': margin + 800,
+        'width': 350,
+        'height': thickness
+    })
+    
+    # Row 7
+    walls.append({
+        'x': margin + 150,
+        'y': margin + 950,
+        'width': 300,
+        'height': thickness
+    })
+    
+    walls.append({
+        'x': margin + 600,
+        'y': margin + 950,
+        'width': 600,
+        'height': thickness
+    })
+    
+    # Vertical internal walls - Column 1
+    walls.append({
+        'x': margin + 200,
         'y': margin + 80,
         'width': thickness,
-        'height': 120
+        'height': 180
     })
     
     # Column 2
     walls.append({
-        'x': margin + 250,
+        'x': margin + 400,
         'y': margin + 200,
         'width': thickness,
-        'height': 220
+        'height': 300
     })
     
     # Column 3
     walls.append({
-        'x': margin + 350,
+        'x': margin + 550,
         'y': margin + 80,
         'width': thickness,
-        'height': 120
+        'height': 200
     })
     
     # Column 4
     walls.append({
-        'x': margin + 450,
-        'y': margin + 200,
+        'x': margin + 700,
+        'y': margin + 350,
         'width': thickness,
-        'height': 120
+        'height': 300
     })
     
     # Column 5
     walls.append({
-        'x': margin + 550,
-        'y': margin + 320,
+        'x': margin + 900,
+        'y': margin + 150,
         'width': thickness,
-        'height': 150
+        'height': 350
+    })
+    
+    # Column 6
+    walls.append({
+        'x': margin + 1050,
+        'y': margin + 500,
+        'width': thickness,
+        'height': 300
+    })
+    
+    # Column 7
+    walls.append({
+        'x': margin + 1200,
+        'y': margin + 350,
+        'width': thickness,
+        'height': 450
+    })
+    
+    # Column 8
+    walls.append({
+        'x': margin + 350,
+        'y': margin + 650,
+        'width': thickness,
+        'height': 300
+    })
+    
+    # Column 9
+    walls.append({
+        'x': margin + 500,
+        'y': margin + 800,
+        'width': thickness,
+        'height': 270
+    })
+    
+    # Column 10
+    walls.append({
+        'x': margin + 800,
+        'y': margin + 650,
+        'width': thickness,
+        'height': 300
+    })
+    
+    # Column 11
+    walls.append({
+        'x': margin + 1100,
+        'y': margin + 800,
+        'width': thickness,
+        'height': 220
     })
     
     # Make sure to leave space around all possible starting points
     for start_pos in PLAYER_STARTS:
         walls = [w for w in walls if not is_near_start(w, start_pos, 100)]
     
-    print(f"Generated {len(walls)} labyrinth walls")
+    print(f"Generated {len(walls)} labyrinth walls for {MAP_WIDTH}x{MAP_HEIGHT} map")
     return walls
 
 def is_near_start(wall, start_pos, clearance):

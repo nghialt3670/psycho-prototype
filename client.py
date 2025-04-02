@@ -8,10 +8,16 @@ import json
 # Initialize Pygame
 pygame.init()
 
-# Screen dimensions
-WIDTH, HEIGHT = 800, 600
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
+# Screen dimensions (viewport size)
+SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Multiplayer Labyrinth Game")
+
+# Map dimensions (4x larger than screen)
+MAP_WIDTH, MAP_HEIGHT = 1600, 1200
+
+# Camera system
+camera_x, camera_y = 0, 0
 
 # Colors
 WHITE = (255, 255, 255)
@@ -21,10 +27,11 @@ BROWN = (139, 69, 19)  # Color for walls
 DARK_BROWN = (101, 67, 33)  # Darker color for wall edges
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)  # Blue color for other players on mini-map
 
 # Player settings
 PLAYER_SIZE = 40  # Slightly smaller player for easier navigation
-player_x, player_y = WIDTH // 2, HEIGHT // 2
+player_x, player_y = MAP_WIDTH // 4, MAP_HEIGHT // 4
 player_speed = 5
 player_color = None
 
@@ -59,13 +66,34 @@ sio = socketio.Client()
 # Lock for thread safety
 lock = threading.Lock()
 
+def update_camera():
+    """Update the camera position to center on the player"""
+    global camera_x, camera_y
+    
+    # Center the camera on the player with some boundary checks
+    camera_x = player_x - SCREEN_WIDTH // 2
+    camera_y = player_y - SCREEN_HEIGHT // 2
+    
+    # Make sure camera doesn't go out of bounds
+    camera_x = max(0, min(camera_x, MAP_WIDTH - SCREEN_WIDTH))
+    camera_y = max(0, min(camera_y, MAP_HEIGHT - SCREEN_HEIGHT))
+
+def world_to_screen(world_x, world_y):
+    """Convert world coordinates to screen coordinates"""
+    return world_x - camera_x, world_y - camera_y
+
+def screen_to_world(screen_x, screen_y):
+    """Convert screen coordinates to world coordinates"""
+    return screen_x + camera_x, screen_y + camera_y
+
 def reset_game_state():
     """Reset all game state when changing rooms or disconnecting"""
-    global in_room, in_lobby, remote_positions, walls, local_player
+    global in_room, in_lobby, remote_positions, walls, local_player, camera_x, camera_y
     in_room = False
     in_lobby = True
     remote_positions = {}  # Clear all remote player data
     walls = []
+    camera_x, camera_y = 0, 0
     
     # Reset local player data
     local_player = {
@@ -177,8 +205,8 @@ def game_state(data):
 
 def check_wall_collision(new_x, new_y):
     """Check if the player would collide with any wall at the new position"""
-    # First check screen boundaries
-    if new_x < 0 or new_x > WIDTH - PLAYER_SIZE or new_y < 0 or new_y > HEIGHT - PLAYER_SIZE:
+    # First check map boundaries
+    if new_x < 0 or new_x > MAP_WIDTH - PLAYER_SIZE or new_y < 0 or new_y > MAP_HEIGHT - PLAYER_SIZE:
         return True
         
     player_rect = pygame.Rect(new_x, new_y, PLAYER_SIZE, PLAYER_SIZE)
@@ -214,48 +242,64 @@ def check_wall_collision(new_x, new_y):
     return False
 
 def draw_wall(wall):
-    """Draw a single wall with a 3D effect"""
+    """Draw a single wall with a 3D effect, converting world coords to screen coords"""
     x = wall.get('x', 0)
     y = wall.get('y', 0)
     width = wall.get('width', 50)
     height = wall.get('height', 50)
     
+    # Convert world coordinates to screen coordinates
+    screen_x, screen_y = world_to_screen(x, y)
+    
+    # Skip walls that are completely outside the screen
+    if (screen_x + width < 0 or screen_x > SCREEN_WIDTH or
+        screen_y + height < 0 or screen_y > SCREEN_HEIGHT):
+        return
+    
     # Main wall
-    pygame.draw.rect(screen, BROWN, (x, y, width, height))
+    pygame.draw.rect(screen, BROWN, (screen_x, screen_y, width, height))
     
     # Dark edge for 3D effect
     edge_size = 3
     if width > height:  # Horizontal wall
-        pygame.draw.rect(screen, DARK_BROWN, (x, y, width, edge_size))  # Top edge
-        pygame.draw.rect(screen, DARK_BROWN, (x, y + height - edge_size, width, edge_size))  # Bottom edge
+        pygame.draw.rect(screen, DARK_BROWN, (screen_x, screen_y, width, edge_size))  # Top edge
+        pygame.draw.rect(screen, DARK_BROWN, (screen_x, screen_y + height - edge_size, width, edge_size))  # Bottom edge
     else:  # Vertical wall
-        pygame.draw.rect(screen, DARK_BROWN, (x, y, edge_size, height))  # Left edge
-        pygame.draw.rect(screen, DARK_BROWN, (x + width - edge_size, y, edge_size, height))  # Right edge
+        pygame.draw.rect(screen, DARK_BROWN, (screen_x, screen_y, edge_size, height))  # Left edge
+        pygame.draw.rect(screen, DARK_BROWN, (screen_x + width - edge_size, screen_y, edge_size, height))  # Right edge
 
 def draw_player(x, y, color, is_local=False):
-    """Draw a player with a face on it"""
+    """Draw a player with a face on it, converting world coords to screen coords"""
+    # Convert world coordinates to screen coordinates
+    screen_x, screen_y = world_to_screen(x, y)
+    
+    # Skip players completely outside the screen
+    if (screen_x + PLAYER_SIZE < 0 or screen_x > SCREEN_WIDTH or
+        screen_y + PLAYER_SIZE < 0 or screen_y > SCREEN_HEIGHT):
+        return
+    
     # Draw the square body
-    pygame.draw.rect(screen, color, (x, y, PLAYER_SIZE, PLAYER_SIZE))
+    pygame.draw.rect(screen, color, (screen_x, screen_y, PLAYER_SIZE, PLAYER_SIZE))
     
     # Draw a black border (thicker for local player)
     border_width = 3 if is_local else 2
-    pygame.draw.rect(screen, BLACK, (x, y, PLAYER_SIZE, PLAYER_SIZE), border_width)
+    pygame.draw.rect(screen, BLACK, (screen_x, screen_y, PLAYER_SIZE, PLAYER_SIZE), border_width)
     
     # Draw eyes (white with black pupils)
     eye_size = PLAYER_SIZE // 5
-    eye_y = y + PLAYER_SIZE // 3
+    eye_y = screen_y + PLAYER_SIZE // 3
     # Left eye
-    pygame.draw.circle(screen, WHITE, (x + PLAYER_SIZE // 3, eye_y), eye_size)
-    pygame.draw.circle(screen, BLACK, (x + PLAYER_SIZE // 3, eye_y), eye_size // 2)
+    pygame.draw.circle(screen, WHITE, (screen_x + PLAYER_SIZE // 3, eye_y), eye_size)
+    pygame.draw.circle(screen, BLACK, (screen_x + PLAYER_SIZE // 3, eye_y), eye_size // 2)
     # Right eye
-    pygame.draw.circle(screen, WHITE, (x + 2 * PLAYER_SIZE // 3, eye_y), eye_size)
-    pygame.draw.circle(screen, BLACK, (x + 2 * PLAYER_SIZE // 3, eye_y), eye_size // 2)
+    pygame.draw.circle(screen, WHITE, (screen_x + 2 * PLAYER_SIZE // 3, eye_y), eye_size)
+    pygame.draw.circle(screen, BLACK, (screen_x + 2 * PLAYER_SIZE // 3, eye_y), eye_size // 2)
     
     # Draw smile (bigger for local player)
-    smile_y = y + 2 * PLAYER_SIZE // 3
+    smile_y = screen_y + 2 * PLAYER_SIZE // 3
     smile_width = PLAYER_SIZE // 2
     pygame.draw.arc(screen, BLACK, 
-                    (x + PLAYER_SIZE // 4, smile_y, smile_width, PLAYER_SIZE // 4),
+                    (screen_x + PLAYER_SIZE // 4, smile_y, smile_width, PLAYER_SIZE // 4),
                     0, 3.14, 2)
 
 def draw_lobby():
@@ -263,36 +307,72 @@ def draw_lobby():
     
     # Draw title
     title = title_font.render("Multiplayer Labyrinth Game", True, BLACK)
-    screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 50))
+    screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 50))
     
     # Draw input box for room name
-    pygame.draw.rect(screen, GRAY, (WIDTH // 2 - 150, 150, 300, 40))
+    pygame.draw.rect(screen, GRAY, (SCREEN_WIDTH // 2 - 150, 150, 300, 40))
     room_text = font.render(room_name, True, BLACK)
-    screen.blit(room_text, (WIDTH // 2 - 145, 155))
+    screen.blit(room_text, (SCREEN_WIDTH // 2 - 145, 155))
     
     # Draw create room button
-    pygame.draw.rect(screen, GRAY, (WIDTH // 2 - 150, 220, 300, 40))
+    pygame.draw.rect(screen, GRAY, (SCREEN_WIDTH // 2 - 150, 220, 300, 40))
     create_text = font.render("Create Room", True, BLACK)
-    screen.blit(create_text, (WIDTH // 2 - create_text.get_width() // 2, 225))
+    screen.blit(create_text, (SCREEN_WIDTH // 2 - create_text.get_width() // 2, 225))
     
     # Draw join room button
-    pygame.draw.rect(screen, GRAY, (WIDTH // 2 - 150, 280, 300, 40))
+    pygame.draw.rect(screen, GRAY, (SCREEN_WIDTH // 2 - 150, 280, 300, 40))
     join_text = font.render("Join Room", True, BLACK)
-    screen.blit(join_text, (WIDTH // 2 - join_text.get_width() // 2, 285))
+    screen.blit(join_text, (SCREEN_WIDTH // 2 - join_text.get_width() // 2, 285))
     
     # Connection status
     status_text = font.render(f"Status: {'Connected' if connected else 'Disconnected'}", True, BLACK)
-    screen.blit(status_text, (20, HEIGHT - 40))
+    screen.blit(status_text, (20, SCREEN_HEIGHT - 40))
+
+def draw_mini_map():
+    """Draw a mini-map in the corner to show the player's position in the larger map"""
+    mini_map_size = 150
+    mini_map_x = SCREEN_WIDTH - mini_map_size - 10
+    mini_map_y = 10
+    
+    # Draw background
+    pygame.draw.rect(screen, WHITE, (mini_map_x, mini_map_y, mini_map_size, mini_map_size))
+    pygame.draw.rect(screen, BLACK, (mini_map_x, mini_map_y, mini_map_size, mini_map_size), 2)
+    
+    # Calculate scale factors
+    scale_x = mini_map_size / MAP_WIDTH
+    scale_y = mini_map_size / MAP_HEIGHT
+    
+    # Draw viewport rectangle (showing current camera view)
+    view_x = mini_map_x + camera_x * scale_x
+    view_y = mini_map_y + camera_y * scale_y
+    view_width = SCREEN_WIDTH * scale_x
+    view_height = SCREEN_HEIGHT * scale_y
+    pygame.draw.rect(screen, (200, 200, 255), (view_x, view_y, view_width, view_height), 2)
+    
+    # Draw player position on mini-map
+    player_mini_x = mini_map_x + player_x * scale_x
+    player_mini_y = mini_map_y + player_y * scale_y
+    pygame.draw.circle(screen, RED, (int(player_mini_x), int(player_mini_y)), 4)
+    
+    # Draw other players
+    for idx, player_data in remote_positions.items():
+        if 'x' in player_data and 'y' in player_data:
+            other_x = mini_map_x + player_data['x'] * scale_x
+            other_y = mini_map_y + player_data['y'] * scale_y
+            pygame.draw.circle(screen, BLUE, (int(other_x), int(other_y)), 3)
 
 def draw_game():
     # Clear the screen at the start of each frame
     screen.fill(WHITE)
     
+    # Update camera to follow player
+    update_camera()
+    
     # Draw all walls
     for wall in walls:
         draw_wall(wall)
     
-    # Room info
+    # Room info and player count (fixed position on screen)
     room_text = font.render(f"Room: {room_name}", True, BLACK)
     screen.blit(room_text, (20, 20))
     
@@ -300,6 +380,10 @@ def draw_game():
     player_count = len(remote_positions) + 1  # Count local player + remote players
     count_text = font.render(f"Players: {player_count}", True, BLACK)
     screen.blit(count_text, (20, 50))
+    
+    # Display coordinates (helpful for debugging with larger map)
+    pos_text = font.render(f"Pos: ({player_x}, {player_y})", True, BLACK)
+    screen.blit(pos_text, (20, 80))
     
     # Draw ONLY remote players
     for position_index, player_data in remote_positions.items():
@@ -316,9 +400,12 @@ def draw_game():
     if local_player['color'] is not None:
         draw_player(player_x, player_y, local_player['color'], is_local=True)
     
+    # Draw mini-map
+    draw_mini_map()
+    
     # Instructions
     instr_text = font.render("Use arrow keys to navigate the maze, ESC to quit", True, BLACK)
-    screen.blit(instr_text, (WIDTH // 2 - instr_text.get_width() // 2, HEIGHT - 40))
+    screen.blit(instr_text, (SCREEN_WIDTH // 2 - instr_text.get_width() // 2, SCREEN_HEIGHT - 40))
 
 def send_position_update(x, y):
     """Send position update to server without waiting for response"""
@@ -351,12 +438,12 @@ def update_local_player_position(keys):
     # Process key presses to determine direction vector
     if keys[pygame.K_LEFT] and player_x > 0:
         dx = -1
-    elif keys[pygame.K_RIGHT] and player_x < WIDTH - PLAYER_SIZE:
+    elif keys[pygame.K_RIGHT] and player_x < MAP_WIDTH - PLAYER_SIZE:
         dx = 1
         
     if keys[pygame.K_UP] and player_y > 0:
         dy = -1
-    elif keys[pygame.K_DOWN] and player_y < HEIGHT - PLAYER_SIZE:
+    elif keys[pygame.K_DOWN] and player_y < MAP_HEIGHT - PLAYER_SIZE:
         dy = 1
     
     # Normalize diagonal movement to maintain consistent speed
@@ -390,6 +477,7 @@ def print_debug_info():
     """Print debug information about player positions"""
     print("\n--- DEBUG INFO ---")
     print(f"Local player: ({player_x}, {player_y}) [index: {local_player['position_index']}] [SID: {client_sid}]")
+    print(f"Camera: ({camera_x}, {camera_y})")
     print(f"Remote players: {len(remote_positions)}")
     for idx, data in remote_positions.items():
         print(f"  Remote[{idx}]: ({data['x']}, {data['y']})")
@@ -423,13 +511,13 @@ def main():
             if in_lobby:  # Handle lobby events
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     # Check if room name input box is clicked
-                    if WIDTH // 2 - 150 <= event.pos[0] <= WIDTH // 2 + 150 and 150 <= event.pos[1] <= 190:
+                    if SCREEN_WIDTH // 2 - 150 <= event.pos[0] <= SCREEN_WIDTH // 2 + 150 and 150 <= event.pos[1] <= 190:
                         input_active = True
                     else:
                         input_active = False
                     
                     # Check if create room button is clicked
-                    if WIDTH // 2 - 150 <= event.pos[0] <= WIDTH // 2 + 150 and 220 <= event.pos[1] <= 260:
+                    if SCREEN_WIDTH // 2 - 150 <= event.pos[0] <= SCREEN_WIDTH // 2 + 150 and 220 <= event.pos[1] <= 260:
                         if connected and room_name:
                             # Reset game state BEFORE creating a room
                             reset_game_state()
@@ -465,7 +553,7 @@ def main():
                                 print(f"Failed to create room: {result.get('message', 'Unknown error')}")
                     
                     # Check if join room button is clicked
-                    if WIDTH // 2 - 150 <= event.pos[0] <= WIDTH // 2 + 150 and 280 <= event.pos[1] <= 320:
+                    if SCREEN_WIDTH // 2 - 150 <= event.pos[0] <= SCREEN_WIDTH // 2 + 150 and 280 <= event.pos[1] <= 320:
                         if connected and room_name:
                             # Reset game state BEFORE joining a room
                             reset_game_state()
@@ -479,8 +567,8 @@ def main():
                                 local_player['color'] = result.get('color')
                                 local_player['position_index'] = result.get('position_index', 0)
                                 walls = result.get('walls', [])
-                                player_x = result.get('x', WIDTH - 120)
-                                player_y = result.get('y', HEIGHT - 120)
+                                player_x = result.get('x', MAP_WIDTH - 120)
+                                player_y = result.get('y', MAP_HEIGHT - 120)
                                 local_player['x'] = player_x
                                 local_player['y'] = player_y
                                 
