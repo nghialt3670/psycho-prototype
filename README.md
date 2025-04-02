@@ -95,15 +95,15 @@ To use the automated deployment, you need to add the following secrets to your G
 1. `DOCKERHUB_USERNAME`: Your Docker Hub username
 2. `DOCKERHUB_TOKEN`: A Docker Hub access token
 3. `AWS_HOST`: Your AWS server's IP address or domain name
-4. `AWS_USERNAME`: SSH username for your AWS server
-5. `AWS_SSH_KEY`: SSH private key for authentication
+4. `AWS_USERNAME`: SSH username for your AWS server (typically 'ec2-user', 'ubuntu', or 'admin')
+5. `AWS_SSH_KEY`: The content of your AWS PEM private key file (cat your-key.pem)
 6. `APP_DIR`: Directory on the AWS server where the app should be deployed
 
 ### How It Works
 
 1. When you push to the main/master branch, the workflow automatically triggers
 2. The Docker image is built and pushed to Docker Hub
-3. The workflow connects to your AWS server via SSH
+3. The workflow connects to your AWS server via SSH using your PEM key
 4. It creates or updates the docker-compose.yml file
 5. It pulls the latest image and restarts the container
 
