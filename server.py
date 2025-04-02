@@ -27,8 +27,8 @@ player_colors = [
 
 # Wall settings
 WALL_WIDTH = 20
-MAP_WIDTH = 1600  # 800 * 2
-MAP_HEIGHT = 1200  # 600 * 2
+MAP_WIDTH = 2400  # 1600 * 1.5
+MAP_HEIGHT = 1800  # 1200 * 1.5
 
 # Player settings
 PLAYER_SIZE = 40

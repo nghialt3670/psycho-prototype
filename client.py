@@ -21,8 +21,8 @@ SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Multiplayer Labyrinth Game")
 
-# Map dimensions (4x larger than screen)
-MAP_WIDTH, MAP_HEIGHT = 1600, 1200
+# Map dimensions (larger than screen)
+MAP_WIDTH, MAP_HEIGHT = 2400, 1800  # 1600*1.5, 1200*1.5
 
 # Camera system
 camera_x, camera_y = 0, 0
@@ -361,13 +361,6 @@ def draw_mini_map():
     player_mini_x = mini_map_x + player_x * scale_x
     player_mini_y = mini_map_y + player_y * scale_y
     pygame.draw.circle(screen, RED, (int(player_mini_x), int(player_mini_y)), 4)
-    
-    # Draw other players
-    for idx, player_data in remote_positions.items():
-        if 'x' in player_data and 'y' in player_data:
-            other_x = mini_map_x + player_data['x'] * scale_x
-            other_y = mini_map_y + player_data['y'] * scale_y
-            pygame.draw.circle(screen, BLUE, (int(other_x), int(other_y)), 3)
 
 def draw_game():
     # Clear the screen at the start of each frame
@@ -388,10 +381,6 @@ def draw_game():
     player_count = len(remote_positions) + 1  # Count local player + remote players
     count_text = font.render(f"Players: {player_count}", True, BLACK)
     screen.blit(count_text, (20, 50))
-    
-    # Display coordinates (helpful for debugging with larger map)
-    pos_text = font.render(f"Pos: ({player_x}, {player_y})", True, BLACK)
-    screen.blit(pos_text, (20, 80))
     
     # Draw ONLY remote players
     for position_index, player_data in remote_positions.items():

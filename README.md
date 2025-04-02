@@ -46,3 +46,61 @@ python client.py
 ## Game Controls
 - Arrow keys: Move your square
 - Enter: Confirm room name input
+
+# Multiplayer Labyrinth Game Server
+
+A Socket.IO based server for the multiplayer labyrinth game.
+
+## Docker Setup
+
+### Prerequisites
+- [Docker](https://docs.docker.com/get-docker/)
+- [Docker Compose](https://docs.docker.com/compose/install/) (optional, but recommended)
+
+### Running with Docker Compose (Recommended)
+
+1. Build and start the server:
+   ```
+   docker-compose up -d
+   ```
+
+2. Stop the server:
+   ```
+   docker-compose down
+   ```
+
+### Running with Docker (Alternative)
+
+1. Build the Docker image:
+   ```
+   docker build -t labyrinth-server .
+   ```
+
+2. Run the container:
+   ```
+   docker run -p 5000:5000 labyrinth-server
+   ```
+
+## Connecting Clients
+
+The server will be accessible at:
+- Local: http://localhost:5000
+- Network: http://<your-ip-address>:5000
+
+To connect from other machines, make sure to update the `.env` file on the client side to point to your server's IP address:
+```
+SERVER_URL=http://<your-ip-address>:5000
+```
+
+## Development
+
+If you want to modify the server code during development, use the volume mount in docker-compose.yml, which enables automatic code updates.
+
+## Troubleshooting
+
+- If the server doesn't start, check Docker logs:
+  ```
+  docker-compose logs
+  ```
+
+- Make sure port 5000 is not already in use on your system.
