@@ -60,7 +60,7 @@ A Socket.IO based server for the multiplayer labyrinth game.
 
 1. Pull and run the Docker image:
    ```
-   docker run -d --name labyrinth-server -p 5000:5000 --restart unless-stopped yourusername/labyrinth-server:latest
+   docker run -d --name labyrinth-server -p 5000:5000/tcp -p 5000:5000/udp --restart unless-stopped yourusername/labyrinth-server:latest
    ```
 
 2. Stop the container:
@@ -95,7 +95,7 @@ To use the automated deployment, you need to add the following secrets to your G
 1. When you push to the main/master branch, the workflow automatically triggers
 2. The Docker image is built and pushed to Docker Hub
 3. The workflow connects to your AWS server via SSH using your PEM key
-4. It stops any existing container, pulls the latest image, and runs a new container
+4. It stops any existing container, pulls the latest image, and runs a new container with both TCP and UDP ports mapped
 
 ### Manual Deployment
 

@@ -48,9 +48,10 @@ jobs:
             # Pull the latest image
             docker pull ${{ secrets.DOCKERHUB_USERNAME }}/labyrinth-server:latest
             
-            # Run the container
+            # Run the container with both TCP and UDP mapped
             docker run -d \
               --name labyrinth-server \
-              -p 5000:5000 \
+              -p 5000:5000/tcp \
+              -p 5000:5000/udp \
               --restart unless-stopped \
               ${{ secrets.DOCKERHUB_USERNAME }}/labyrinth-server:latest 
