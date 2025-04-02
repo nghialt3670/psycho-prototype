@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Labyrinth Game</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="game-container">
+        <div id="lobby" class="screen">
+            <h1>Multiplayer Labyrinth Game</h1>
+            <div class="input-container">
+                <input type="text" id="room-name" placeholder="Enter room name">
+            </div>
+            <div class="button-container">
+                <button id="create-room">Create Room</button>
+                <button id="join-room">Join Room</button>
+            </div>
+            <div id="connection-status">Status: Disconnected</div>
+        </div>
+        
+        <div id="game" class="screen hidden">
+            <canvas id="game-canvas" width="800" height="600"></canvas>
+            <div id="game-info">
+                <div id="room-info">Room: <span id="current-room"></span></div>
+                <div id="player-count">Players: 1</div>
+                <div id="fps">FPS: 0</div>
+            </div>
+            <div id="instructions">Use arrow keys to navigate the maze, ESC to quit</div>
+        </div>
+    </div>
+
+    <!-- Socket.IO Client -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    
+    <!-- Game scripts -->
+    <script src="game.js"></script>
+</body>
+</html> 
