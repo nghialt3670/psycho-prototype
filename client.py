@@ -235,18 +235,7 @@ def check_wall_collision(new_x, new_y):
         if player_rect.colliderect(wall_rect):
             return True
     
-    # Optionally check collision with other players
-    # This is optional and can be commented out if you don't want player-player collisions
-    for idx, remote_player in remote_positions.items():
-        if idx == local_player['position_index']:
-            continue  # Skip self
-            
-        remote_x = remote_player.get('x', 0)
-        remote_y = remote_player.get('y', 0)
-        remote_rect = pygame.Rect(remote_x, remote_y, PLAYER_SIZE, PLAYER_SIZE)
-        
-        if player_rect.colliderect(remote_rect):
-            return True
+    # Player-player collision code removed to allow players to move through each other
     
     return False
 
