@@ -41,15 +41,62 @@ Alternatively, you can use any local development server like Live Server for VS 
 To deploy the game to a web server:
 
 1. Upload all files in the `web` directory to your web server
-2. Make sure to update the `SERVER_URL` in `game.js` to point to your actual Socket.IO server address
+2. Configure the server URL (see below)
 
-## Configuration
+## Server Configuration
 
-In `game.js`, update the `SERVER_URL` constant to point to your Socket.IO server:
+There are multiple ways to configure the server URL:
+
+### 1. Edit Hardcoded Values (Recommended)
+
+The easiest way is to edit the hardcoded values in `config-loader.js`:
 
 ```javascript
-const SERVER_URL = 'http://your-server-address:5000';
+window.ENV = {
+    // Server configuration
+    SERVER_URL: 'http://your-server-address:5000',
+    
+    // Game configuration
+    DEBUG: false,
+    
+    // Version information
+    VERSION: '1.0.0'
+};
 ```
+
+Simply change the `SERVER_URL` value to point to your game server.
+
+### 2. URL Parameter
+
+You can also specify the server URL using a URL parameter without changing the code:
+
+```
+http://your-game-site.com/?server=http://your-server-address:5000
+```
+
+### 3. Inject Configuration in HTML
+
+For deployment scenarios, you can inject a SERVER_CONFIG variable before loading the game:
+
+```html
+<script>
+window.SERVER_CONFIG = {
+    serverUrl: 'http://your-server-address:5000'
+};
+</script>
+<!-- Then include config-loader.js -->
+<script src="config-loader.js"></script>
+```
+
+## How the Configuration System Works
+
+The configuration system uses a simple priority order:
+
+1. Hardcoded values (lowest priority)
+2. URL parameters (override hardcoded values)
+3. Global SERVER_CONFIG variable (highest priority)
+
+This gives you flexibility for different deployment scenarios.
 
 ## Compatibility with the Original Server
 

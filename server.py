@@ -569,6 +569,12 @@ def get_game_state(sid, data=None):
     
     return {'success': True, 'game_state': game_state}
 
+@sio.event
+def ping(sid):
+    """Respond to ping requests from clients"""
+    # Simply respond to the event, client will calculate ping based on round-trip time
+    return {"status": "pong"}
+
 if __name__ == '__main__':
     port = 5000
     wsgi.server(eventlet.listen(('', port)), app) 

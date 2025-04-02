@@ -1,5 +1,5 @@
 // Configuration
-const SERVER_URL = 'http://localhost:5000';  // Update with your server URL
+const SERVER_URL = 'http://localhost:5000';
 
 // Canvas setup
 const canvas = document.getElementById('game-canvas');
@@ -67,6 +67,11 @@ let fps = 0;
 let lastFpsUpdateTime = 0;
 let frameCount = 0;
 
+// Ping measurement
+let ping = 0;
+let lastPingTime = 0;
+const PING_INTERVAL = 2000; // Check ping every 2 seconds
+
 // Socket.IO setup
 const socket = io(SERVER_URL);
 
@@ -80,6 +85,7 @@ const connectionStatus = document.getElementById('connection-status');
 const currentRoomDisplay = document.getElementById('current-room');
 const playerCountDisplay = document.getElementById('player-count');
 const fpsDisplay = document.getElementById('fps');
+const pingDisplay = document.getElementById('ping');
 
 // Socket.IO event handlers
 socket.on('connect', () => {
@@ -87,6 +93,9 @@ socket.on('connect', () => {
     clientSid = socket.id;
     inLobby = true;
     connectionStatus.textContent = 'Status: Connected';
+    
+    // Start measuring ping
+    measurePing();
 });
 
 socket.on('disconnect', () => {
@@ -96,6 +105,10 @@ socket.on('disconnect', () => {
     resetGameState();
     connectionStatus.textContent = 'Status: Disconnected';
     showLobby();
+    
+    // Reset ping display
+    ping = 0;
+    updatePingDisplay();
 });
 
 socket.on('game_state', (data) => {
@@ -108,6 +121,14 @@ socket.on('player_joined', (data) => {
 
 socket.on('player_left', (data) => {
     // Server will broadcast updated game state
+});
+
+// Ping response handler
+socket.on('pong', () => {
+    // Calculate ping based on how long it took to get a response
+    const endTime = performance.now();
+    ping = Math.round(endTime - lastPingTime);
+    updatePingDisplay();
 });
 
 // Game functions
@@ -190,6 +211,29 @@ function processGameState(data) {
 function updatePlayerCount() {
     const count = Object.keys(remotePositions).length + 1;
     playerCountDisplay.textContent = `Players: ${count}`;
+}
+
+function updatePingDisplay() {
+    pingDisplay.textContent = `Ping: ${ping}ms`;
+    
+    // Add color coding based on ping value
+    if (ping < 50) {
+        pingDisplay.className = 'good-ping';
+    } else if (ping < 100) {
+        pingDisplay.className = 'ok-ping';
+    } else {
+        pingDisplay.className = 'bad-ping';
+    }
+}
+
+function measurePing() {
+    if (connected) {
+        lastPingTime = performance.now();
+        socket.emit('ping');
+        
+        // Schedule next ping measurement
+        setTimeout(measurePing, PING_INTERVAL);
+    }
 }
 
 function updateCamera() {

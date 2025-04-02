@@ -78,9 +78,17 @@ button:hover {
 
 #connection-status {
     position: absolute;
-    bottom: 20px;
+    bottom: 50px;
     left: 20px;
     font-size: 16px;
+    color: #666;
+}
+
+#server-info {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    font-size: 14px;
     color: #666;
 }
 
@@ -106,6 +114,22 @@ button:hover {
 
 #game-info > div {
     margin-bottom: 5px;
+}
+
+/* Ping display styles */
+.good-ping {
+    color: #4CAF50; /* Green */
+    font-weight: bold;
+}
+
+.ok-ping {
+    color: #FF9800; /* Orange */
+    font-weight: bold;
+}
+
+.bad-ping {
+    color: #F44336; /* Red */
+    font-weight: bold;
 }
 
 #instructions {
