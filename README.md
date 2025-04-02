@@ -55,30 +55,22 @@ A Socket.IO based server for the multiplayer labyrinth game.
 
 ### Prerequisites
 - [Docker](https://docs.docker.com/get-docker/)
-- [Docker Compose](https://docs.docker.com/compose/install/) (optional, but recommended)
 
-### Running with Docker Compose (Recommended)
+### Running with Docker
 
-1. Build and start the server:
+1. Pull and run the Docker image:
    ```
-   docker-compose up -d
-   ```
-
-2. Stop the server:
-   ```
-   docker-compose down
+   docker run -d --name labyrinth-server -p 5000:5000 --restart unless-stopped yourusername/labyrinth-server:latest
    ```
 
-### Running with Docker (Alternative)
-
-1. Build the Docker image:
+2. Stop the container:
    ```
-   docker build -t labyrinth-server .
+   docker stop labyrinth-server
    ```
 
-2. Run the container:
+3. Remove the container:
    ```
-   docker run -p 5000:5000 labyrinth-server
+   docker rm labyrinth-server
    ```
 
 ## GitHub Actions Automated Deployment
@@ -97,15 +89,13 @@ To use the automated deployment, you need to add the following secrets to your G
 3. `AWS_HOST`: Your AWS server's IP address or domain name
 4. `AWS_USERNAME`: SSH username for your AWS server (typically 'ec2-user', 'ubuntu', or 'admin')
 5. `AWS_SSH_KEY`: The content of your AWS PEM private key file (cat your-key.pem)
-6. `APP_DIR`: Directory on the AWS server where the app should be deployed
 
 ### How It Works
 
 1. When you push to the main/master branch, the workflow automatically triggers
 2. The Docker image is built and pushed to Docker Hub
 3. The workflow connects to your AWS server via SSH using your PEM key
-4. It creates or updates the docker-compose.yml file
-5. It pulls the latest image and restarts the container
+4. It stops any existing container, pulls the latest image, and runs a new container
 
 ### Manual Deployment
 
@@ -122,15 +112,11 @@ To connect from other machines, make sure to update the `.env` file on the clien
 SERVER_URL=http://<your-ip-address>:5000
 ```
 
-## Development
-
-If you want to modify the server code during development, use the volume mount in docker-compose.yml, which enables automatic code updates.
-
 ## Troubleshooting
 
 - If the server doesn't start, check Docker logs:
   ```
-  docker-compose logs
+  docker logs labyrinth-server
   ```
 
 - Make sure port 5000 is not already in use on your system.

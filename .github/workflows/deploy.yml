@@ -41,23 +41,16 @@ jobs:
           username: ${{ secrets.AWS_USERNAME }}
           key: ${{ secrets.AWS_SSH_KEY }}
           script: |
-            # Create directory if it doesn't exist
-            mkdir -p ${{ secrets.APP_DIR }}
-            cd ${{ secrets.APP_DIR }}
+            # Stop and remove any existing container
+            docker stop labyrinth-server || true
+            docker rm labyrinth-server || true
             
-            # Create or update docker-compose.yml
-            cat > docker-compose.yml << 'EOL'
-            version: '3'
+            # Pull the latest image
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/labyrinth-server:latest
             
-            services:
-              labyrinth-server:
-                image: ${{ secrets.DOCKERHUB_USERNAME }}/labyrinth-server:latest
-                ports:
-                  - "5000:5000"
-                restart: unless-stopped
-            EOL
-            
-            # Pull latest image and restart
-            docker-compose down
-            docker-compose pull
-            docker-compose up -d 
+            # Run the container
+            docker run -d \
+              --name labyrinth-server \
+              -p 5000:5000 \
+              --restart unless-stopped \
+              ${{ secrets.DOCKERHUB_USERNAME }}/labyrinth-server:latest 
