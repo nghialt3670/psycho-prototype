@@ -10,22 +10,40 @@ app = socketio.WSGIApp(sio)
 
 # Game state
 players = {}
-player_colors = [(255, 0, 0), (0, 0, 255)]  # Red and Blue
 rooms = {}
 room_walls = {}  # Store walls for each room
 
+# Expanded player colors for more than 2 players
+player_colors = [
+    (255, 0, 0),    # Red
+    (0, 0, 255),    # Blue
+    (0, 255, 0),    # Green
+    (255, 255, 0),  # Yellow
+    (255, 0, 255),  # Magenta
+    (0, 255, 255),  # Cyan
+    (255, 165, 0),  # Orange
+    (128, 0, 128)   # Purple
+]
+
 # Wall settings
 WALL_WIDTH = 20
-WALL_COUNT = 10
 MAP_WIDTH = 800
 MAP_HEIGHT = 600
 
 # Player settings
 PLAYER_SIZE = 40
 
-# Starting positions for players
-PLAYER1_START = (80, 80)  # Top left
-PLAYER2_START = (MAP_WIDTH - 120, MAP_HEIGHT - 120)  # Bottom right
+# Starting positions for different players
+PLAYER_STARTS = [
+    (80, 80),                        # Top left
+    (MAP_WIDTH - 120, MAP_HEIGHT - 120),  # Bottom right
+    (80, MAP_HEIGHT - 120),          # Bottom left
+    (MAP_WIDTH - 120, 80),           # Top right
+    (MAP_WIDTH // 2, 80),            # Top middle
+    (MAP_WIDTH // 2, MAP_HEIGHT - 120),  # Bottom middle
+    (80, MAP_HEIGHT // 2),           # Left middle
+    (MAP_WIDTH - 120, MAP_HEIGHT // 2)    # Right middle
+]
 
 def generate_walls():
     """Generate a labyrinth-style maze of walls"""
@@ -159,11 +177,9 @@ def generate_walls():
         'height': 150
     })
     
-    # Make sure to leave space around starting points
-    # Clear area around Player 1 start position
-    walls = [w for w in walls if not is_near_start(w, PLAYER1_START, 100)]
-    # Clear area around Player 2 start position
-    walls = [w for w in walls if not is_near_start(w, PLAYER2_START, 100)]
+    # Make sure to leave space around all possible starting points
+    for start_pos in PLAYER_STARTS:
+        walls = [w for w in walls if not is_near_start(w, start_pos, 100)]
     
     print(f"Generated {len(walls)} labyrinth walls")
     return walls
@@ -197,29 +213,64 @@ def is_near_start(wall, start_pos, clearance):
             clear_rect['y'] < wall_rect['y'] + wall_rect['height'] and
             clear_rect['y'] + clear_rect['height'] > wall_rect['y'])
 
-def check_wall_collision(x, y, size, walls):
-    """Check if player collides with any wall"""
-    player_rect = {'x': x, 'y': y, 'width': size, 'height': size}
+def get_room_game_state(room_name):
+    """Generate a complete game state for a room"""
+    if room_name not in rooms:
+        return {}
     
-    for wall in walls:
-        # Simple rectangle collision check
-        if (player_rect['x'] < wall['x'] + wall['width'] and
-            player_rect['x'] + player_rect['width'] > wall['x'] and
-            player_rect['y'] < wall['y'] + wall['height'] and
-            player_rect['y'] + player_rect['height'] > wall['y']):
-            return True
+    # Create a clean game state with all players
+    game_state = {}
+    for player_sid in rooms[room_name]:
+        if player_sid in players:  # Make sure player still exists
+            game_state[player_sid] = {
+                'x': players[player_sid]['x'],
+                'y': players[player_sid]['y'],
+                'color': players[player_sid]['color'],
+                'position_index': players[player_sid]['position_index']  # Include position index
+            }
     
-    return False
+    return game_state
+
+def broadcast_game_state(room_name, exclude_sid=None):
+    """Send game state to all players in a room, optionally excluding one player"""
+    if room_name not in rooms:
+        return
+    
+    game_state = get_room_game_state(room_name)
+    
+    for player_sid in rooms[room_name]:
+        if player_sid != exclude_sid and player_sid in players:
+            sio.emit('game_state', game_state, room=player_sid)
+
+def get_next_player_position(room_name):
+    """Get the next available player position and color index for a room"""
+    if room_name not in rooms:
+        return 0, 0
+    
+    # The position index is the same as the number of players already in the room
+    position_index = len(rooms[room_name]) - 1  # -1 because the player was already added to the room
+    
+    # Make sure we don't exceed our defined positions
+    if position_index >= len(PLAYER_STARTS):
+        position_index = position_index % len(PLAYER_STARTS)
+    
+    # Same for color
+    color_index = position_index
+    if color_index >= len(player_colors):
+        color_index = color_index % len(player_colors)
+    
+    return position_index, color_index
 
 @sio.event
 def connect(sid, environ):
     print('Client connected:', sid)
     players[sid] = {
-        'x': PLAYER1_START[0],
-        'y': PLAYER1_START[1],
+        'x': 0,  # Will be set when joining a room
+        'y': 0,
         'room': None,
         'color': None,
-        'size': PLAYER_SIZE
+        'size': PLAYER_SIZE,
+        'position_index': -1  # Will be set when joining a room
     }
 
 @sio.event
@@ -228,125 +279,170 @@ def disconnect(sid):
     if sid in players:
         room = players[sid]['room']
         if room and room in rooms:
+            # Remove player from the room
             rooms[room].remove(sid)
+            print(f"Player {sid} removed from room {room}, {len(rooms[room])} players left")
+            
+            # Clean up room if empty
             if not rooms[room]:
+                print(f"Room {room} is now empty, cleaning up")
                 del rooms[room]
-                # Clean up walls when room is empty
                 if room in room_walls:
                     del room_walls[room]
+            else:
+                # Notify other players that someone left
+                for player_sid in rooms[room]:
+                    sio.emit('player_left', {}, room=player_sid)
+                
+                # If room still has players, broadcast updated game state
+                broadcast_game_state(room)
+        
+        # Clean up player data
         del players[sid]
 
 @sio.event
 def create_room(sid, data):
     room_name = data.get('room_name')
+    if not room_name:
+        return {'success': False, 'message': 'Room name is required'}
+    
     if room_name in rooms:
         return {'success': False, 'message': 'Room already exists'}
     
+    # Create new room with this player as first member
     rooms[room_name] = [sid]
     players[sid]['room'] = room_name
-    players[sid]['color'] = player_colors[0]
     
-    # Set player 1 starting position
-    players[sid]['x'] = PLAYER1_START[0]
-    players[sid]['y'] = PLAYER1_START[1]
+    # Assign first position and color
+    position_index, color_index = 0, 0  # First player gets first position/color
+    players[sid]['position_index'] = position_index
+    players[sid]['color'] = player_colors[color_index]
+    
+    # Set starting position
+    start_x, start_y = PLAYER_STARTS[position_index]
+    players[sid]['x'] = start_x
+    players[sid]['y'] = start_y
     
     # Generate walls for this room
     room_walls[room_name] = generate_walls()
     
-    # Debug print
-    print(f"Creating room '{room_name}' with {len(room_walls[room_name])} walls")
-    
-    result = {
-        'success': True, 
-        'message': 'Room created', 
-        'color': player_colors[0],
-        'walls': room_walls[room_name],
-        'x': PLAYER1_START[0],
-        'y': PLAYER1_START[1]
+    # Create initial game state with just this player
+    game_state = {
+        sid: {
+            'x': start_x,
+            'y': start_y,
+            'color': player_colors[color_index],
+            'position_index': position_index
+        }
     }
     
-    # Debug print
-    print(f"Sending {len(result['walls'])} walls to client")
+    print(f"Room '{room_name}' created by {sid} (position {position_index})")
     
-    return result
+    # Return success with room data
+    return {
+        'success': True, 
+        'message': 'Room created', 
+        'color': player_colors[color_index],
+        'walls': room_walls[room_name],
+        'x': start_x,
+        'y': start_y,
+        'position_index': position_index,
+        'game_state': game_state
+    }
 
 @sio.event
 def join_room(sid, data):
     room_name = data.get('room_name')
+    if not room_name:
+        return {'success': False, 'message': 'Room name is required'}
+    
     if room_name not in rooms:
         return {'success': False, 'message': 'Room does not exist'}
     
-    if len(rooms[room_name]) >= 2:
-        return {'success': False, 'message': 'Room is full'}
-    
+    # Add player to room
     rooms[room_name].append(sid)
     players[sid]['room'] = room_name
-    players[sid]['color'] = player_colors[1]
     
-    # Set player 2 starting position
-    players[sid]['x'] = PLAYER2_START[0]
-    players[sid]['y'] = PLAYER2_START[1]
+    # Determine position and color based on existing players
+    position_index, color_index = get_next_player_position(room_name)
+    players[sid]['color'] = player_colors[color_index]
+    players[sid]['position_index'] = position_index
     
-    # Notify the first player that someone joined
-    sio.emit('player_joined', {}, room=rooms[room_name][0])
+    # Set starting position
+    start_x, start_y = PLAYER_STARTS[position_index]
+    players[sid]['x'] = start_x
+    players[sid]['y'] = start_y
     
-    # Debug print
-    print(f"Player joined room '{room_name}' with {len(room_walls.get(room_name, []))} walls")
+    # Generate a clean game state including this player
+    game_state = get_room_game_state(room_name)
     
-    result = {
+    # Notify all other players that someone joined and send updated game state
+    for player_sid in rooms[room_name]:
+        if player_sid != sid:
+            sio.emit('player_joined', {}, room=player_sid)
+    
+    # Broadcast game state to all OTHER players
+    broadcast_game_state(room_name, exclude_sid=sid)
+    
+    print(f"Player {sid} joined room '{room_name}' as position {position_index} with {len(rooms[room_name])} total players")
+    
+    # Return success with room data
+    return {
         'success': True, 
         'message': 'Joined room', 
-        'color': player_colors[1],
+        'color': player_colors[color_index],
         'walls': room_walls.get(room_name, []),
-        'x': PLAYER2_START[0],
-        'y': PLAYER2_START[1]
+        'x': start_x,
+        'y': start_y,
+        'position_index': position_index,
+        'game_state': game_state
     }
-    
-    # Debug print
-    print(f"Sending {len(result['walls'])} walls to client")
-    
-    return result
 
 @sio.event
 def list_rooms(sid):
-    available_rooms = {room: len(players) for room, players in rooms.items() if len(players) < 2}
-    return available_rooms
+    room_info = {}
+    for room, players_list in rooms.items():
+        room_info[room] = len(players_list)
+    return room_info
 
 @sio.event
 def update_position(sid, data):
+    """Update a player's position"""
     if sid not in players:
-        return
+        return {'success': False, 'message': 'Player not found'}
     
+    # Get new position
     new_x = data.get('x', players[sid]['x'])
     new_y = data.get('y', players[sid]['y'])
     
-    # Check for wall collisions
+    # Validate room
     room = players[sid]['room']
-    if room and room in room_walls:
-        if check_wall_collision(new_x, new_y, players[sid]['size'], room_walls[room]):
-            # If collision, don't update position and return
-            return {'success': False, 'message': 'Wall collision'}
+    if not room or room not in rooms or sid not in rooms[room]:
+        return {'success': False, 'message': 'Not in a valid room'}
     
-    # Update position if no collision
+    # Update position (no collision detection on server - client handles this)
     players[sid]['x'] = new_x
     players[sid]['y'] = new_y
     
-    if room and room in rooms:
-        # Create game state with ALL players in the room
-        game_state = {}
-        for player_sid in rooms[room]:
-            game_state[player_sid] = {
-                'x': players[player_sid]['x'],
-                'y': players[player_sid]['y'],
-                'color': players[player_sid]['color']
-            }
-        
-        # Send updated game state to all players EXCEPT the one who moved
-        for player_sid in rooms[room]:
-            if player_sid != sid:
-                sio.emit('game_state', game_state, room=player_sid)
+    # Broadcast updated game state to all other players
+    broadcast_game_state(room, exclude_sid=sid)
     
     return {'success': True}
+
+@sio.event
+def get_game_state(sid, data=None):
+    """Request the current game state for the player's room"""
+    if sid not in players:
+        return {'success': False, 'message': 'Player not found'}
+    
+    room = players[sid]['room']
+    if not room or room not in rooms:
+        return {'success': False, 'message': 'Not in a room'}
+    
+    # Get the complete game state for this room
+    game_state = get_room_game_state(room)
+    
+    return {'success': True, 'game_state': game_state}
 
 if __name__ == '__main__':
     port = 5000
