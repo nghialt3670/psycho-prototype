@@ -61,6 +61,10 @@ local_player = {
 # Store remote players by their position_index rather than sid to avoid ghost players
 remote_positions = {}  # Maps position_index -> player data
 
+# Remote player interpolation
+remote_player_buffer = {}  # position_index -> {current: {x,y}, target: {x,y}, last_update: time}
+INTERPOLATION_DURATION = 200  # ms to interpolate between positions
+
 # Walls
 walls = []
 
@@ -96,10 +100,11 @@ def screen_to_world(screen_x, screen_y):
 
 def reset_game_state():
     """Reset all game state when changing rooms or disconnecting"""
-    global in_room, in_lobby, remote_positions, walls, local_player, camera_x, camera_y
+    global in_room, in_lobby, remote_positions, walls, local_player, camera_x, camera_y, remote_player_buffer
     in_room = False
     in_lobby = True
     remote_positions = {}  # Clear all remote player data
+    remote_player_buffer = {}  # Clear interpolation buffer
     walls = []
     camera_x, camera_y = 0, 0
     
@@ -125,7 +130,6 @@ def connect():
     connected = True
     client_sid = sio.sid
     in_lobby = True  # Always start in lobby when connecting
-    print(f"Connected to server with SID: {client_sid}")
 
 @sio.event
 def disconnect():
@@ -135,31 +139,15 @@ def disconnect():
     in_room = False
     # Clear all game state
     reset_game_state()
-    print("Disconnected from server")
-
-def request_game_state():
-    """Request the current game state from the server"""
-    if not connected or not in_room:
-        return
-    
-    try:
-        result = sio.call('get_game_state', {})
-        if result and result.get('success'):
-            game_state_data = result.get('game_state', {})
-            with lock:  # Use lock to prevent race conditions
-                process_game_state(game_state_data)
-        else:
-            print(f"Error requesting game state: {result.get('message')}")
-    except Exception as e:
-        print(f"Error in request_game_state: {e}")
 
 def process_game_state(data):
     """Process game state data into remote_positions dictionary
     Completely separates local player from remote players."""
-    global remote_positions
+    global remote_positions, remote_player_buffer
     
     # CRITICAL: Clear remote_positions first to avoid ghost players
     remote_positions = {}
+    current_time = pygame.time.get_ticks()
     
     if not data or not isinstance(data, dict):
         print("Received invalid game state data")
@@ -182,7 +170,24 @@ def process_game_state(data):
         # Only add valid player data
         if isinstance(player_info, dict) and all(key in player_info for key in ['x', 'y', 'color', 'position_index']):
             position_index = player_info['position_index']
-            # Store by position index, not by sid, to avoid ghost players
+            
+            # Update the remote player buffer for smooth interpolation
+            if position_index not in remote_player_buffer:
+                # First time seeing this player, initialize buffer
+                remote_player_buffer[position_index] = {
+                    'current': {'x': player_info['x'], 'y': player_info['y']},
+                    'target': {'x': player_info['x'], 'y': player_info['y']},
+                    'last_update': current_time
+                }
+            else:
+                # Update target position for existing player
+                remote_player_buffer[position_index]['target'] = {
+                    'x': player_info['x'], 
+                    'y': player_info['y']
+                }
+                remote_player_buffer[position_index]['last_update'] = current_time
+            
+            # Store remote player data in standard position dict for rendering
             remote_positions[position_index] = {
                 'x': player_info['x'],
                 'y': player_info['y'],
@@ -192,24 +197,20 @@ def process_game_state(data):
     print(f"Processed game state: {len(remote_positions)} remote players")
 
 @sio.event
+def game_state(data):
+    """Handle game state updates from server broadcasts"""
+    with lock:
+        process_game_state(data)
+
+@sio.event
 def player_joined(data):
     """Handle notification that a player joined the room"""
-    print("Another player joined the room")
-    # Immediately force a state refresh to see the new player
-    request_game_state()
+    # The server will broadcast the updated game state, so we don't need to request it
 
 @sio.event
 def player_left(data):
     """Handle notification that a player left the room"""
-    print("A player left the room")
-    # Force a state refresh to update player list
-    request_game_state()
-
-@sio.event
-def game_state(data):
-    """Handle game state updates from server"""
-    with lock:
-        process_game_state(data)
+    # The server will broadcast the updated game state, so we don't need to request it
 
 def check_wall_collision(new_x, new_y):
     """Check if the player would collide with any wall at the new position"""
@@ -310,6 +311,26 @@ def draw_player(x, y, color, is_local=False):
                     (screen_x + PLAYER_SIZE // 4, smile_y, smile_width, PLAYER_SIZE // 4),
                     0, 3.14, 2)
 
+def update_remote_player_positions(current_time):
+    """Update interpolated positions for remote players"""
+    for idx in list(remote_player_buffer.keys()):
+        player_data = remote_player_buffer[idx]
+        
+        # Calculate how far we are through the interpolation
+        time_elapsed = current_time - player_data['last_update']
+        
+        if time_elapsed >= INTERPOLATION_DURATION:
+            # Interpolation complete, set current to target
+            player_data['current']['x'] = player_data['target']['x']
+            player_data['current']['y'] = player_data['target']['y']
+        else:
+            # Calculate interpolation progress (0 to 1)
+            progress = time_elapsed / INTERPOLATION_DURATION
+            
+            # Interpolate between current and target
+            player_data['current']['x'] = player_data['current']['x'] + (player_data['target']['x'] - player_data['current']['x']) * progress
+            player_data['current']['y'] = player_data['current']['y'] + (player_data['target']['y'] - player_data['current']['y']) * progress
+
 def draw_lobby():
     screen.fill(WHITE)
     
@@ -350,6 +371,26 @@ def draw_mini_map():
     scale_x = mini_map_size / MAP_WIDTH
     scale_y = mini_map_size / MAP_HEIGHT
     
+    # Draw walls on minimap
+    for wall in walls:
+        if not isinstance(wall, dict):
+            continue
+        
+        # Get wall properties
+        wall_x = wall.get('x', 0)
+        wall_y = wall.get('y', 0)
+        wall_width = wall.get('width', 50)
+        wall_height = wall.get('height', 50)
+        
+        # Scale wall to minimap size
+        mini_wall_x = mini_map_x + wall_x * scale_x
+        mini_wall_y = mini_map_y + wall_y * scale_y
+        mini_wall_width = max(1, wall_width * scale_x)  # Ensure at least 1px wide
+        mini_wall_height = max(1, wall_height * scale_y)  # Ensure at least 1px high
+        
+        # Draw wall on minimap
+        pygame.draw.rect(screen, BROWN, (mini_wall_x, mini_wall_y, mini_wall_width, mini_wall_height))
+    
     # Draw viewport rectangle (showing current camera view)
     view_x = mini_map_x + camera_x * scale_x
     view_y = mini_map_y + camera_y * scale_y
@@ -382,15 +423,24 @@ def draw_game():
     count_text = font.render(f"Players: {player_count}", True, BLACK)
     screen.blit(count_text, (20, 50))
     
-    # Draw ONLY remote players
+    # Current FPS
+    fps_text = font.render(f"FPS: {int(clock.get_fps())}", True, BLACK)
+    screen.blit(fps_text, (20, 80))
+    
+    # Draw ONLY remote players using their interpolated positions
     for position_index, player_data in remote_positions.items():
         # Never render a remote player with same position index as local
         if position_index == local_player['position_index']:
             continue
+        
+        # Get interpolated position from buffer if available
+        if position_index in remote_player_buffer:
+            interpolated_x = remote_player_buffer[position_index]['current']['x']
+            interpolated_y = remote_player_buffer[position_index]['current']['y']
             
-        # Only render valid remote player data
-        if 'x' in player_data and 'y' in player_data and 'color' in player_data:
-            draw_player(player_data['x'], player_data['y'], player_data['color'], is_local=False)
+            # Only render valid remote player data with color
+            if 'color' in player_data:
+                draw_player(interpolated_x, interpolated_y, player_data['color'], is_local=False)
     
     # Draw local player LAST (so it's always on top)
     # CRITICAL: Use the local player_x and player_y variables, NOT local_player dict
@@ -482,6 +532,7 @@ def print_debug_info():
 
 def main():
     global player_x, player_y, connected, in_lobby, in_room, room_name, local_player, remote_positions, walls
+    global clock
     
     clock = pygame.time.Clock()
     input_active = False
@@ -489,11 +540,9 @@ def main():
     # Initial connection attempt
     connected = connect_to_server()
     
-    # For periodic game state updates
-    last_state_request = 0
-    last_debug_print = 0
-    STATE_REQUEST_INTERVAL = 500  # ms, update twice a second for more responsiveness
-    DEBUG_PRINT_INTERVAL = 3000   # Print debug info every 3 seconds
+    # Remove game state request tracking (we'll rely on server broadcasts)
+    last_position_update = 0
+    POSITION_UPDATE_INTERVAL = 100  # Send position updates less frequently than movement
     
     running = True
     while running:
@@ -536,16 +585,8 @@ def main():
                                 # Reset remote player tracking on room join
                                 remote_positions = {}
                                 
-                                print(f"Created room: {room_name} as position {local_player['position_index']}")
-                                print(f"Received {len(walls)} walls")
+                                # No need to request initial game state as server will broadcast it
                                 
-                                # Process game state if included in the response
-                                if 'game_state' in result:
-                                    process_game_state(result['game_state'])
-                                    print_debug_info()
-                                else:
-                                    # Request initial game state
-                                    request_game_state()
                             else:
                                 print(f"Failed to create room: {result.get('message', 'Unknown error')}")
                     
@@ -572,15 +613,8 @@ def main():
                                 # Reset remote player tracking on room join
                                 remote_positions = {}
                                 
-                                print(f"Joined room: {room_name} as position {local_player['position_index']}")
-                                print(f"Received {len(walls)} walls")
+                                # No need to request initial game state as server will broadcast it
                                 
-                                # Process game state if included in the response
-                                if 'game_state' in result:
-                                    process_game_state(result['game_state'])
-                                    print_debug_info()
-                                else:
-                                    request_game_state()
                             else:
                                 print(f"Failed to join room: {result.get('message', 'Unknown error')}")
                 
@@ -599,22 +633,17 @@ def main():
         # Then handle updates based on current state
         if in_room:
             # 1. Handle player movement EVERY frame for smooth movement
+            # This updates the local position immediately without waiting for server
             keys = pygame.key.get_pressed()
             moved, new_x, new_y = update_local_player_position(keys)
-            if moved and connected:
-                # Send the updated position to server
-                # Position variables were already updated in update_local_player_position
+            
+            # 2. Only send position updates periodically to reduce network traffic
+            if moved and connected and current_time - last_position_update > POSITION_UPDATE_INTERVAL:
                 send_position_update(new_x, new_y)
+                last_position_update = current_time
             
-            # 2. Request game state periodically
-            if current_time - last_state_request > STATE_REQUEST_INTERVAL:
-                request_game_state()
-                last_state_request = current_time
-            
-            # 3. Debug info periodically
-            if current_time - last_debug_print > DEBUG_PRINT_INTERVAL:
-                print_debug_info()
-                last_debug_print = current_time
+            # 3. Update interpolated positions for smooth remote player movement
+            update_remote_player_positions(current_time)
         
         # Finally, draw everything
         # Clear screen at start of drawing
