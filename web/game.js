@@ -1,5 +1,5 @@
 // Configuration
-const SERVER_URL = 'https://psycho.vuhuydiet.xyz';
+const SERVER_URL = 'http://localhost:5000';
 
 // Canvas setup
 const canvas = document.getElementById('game-canvas');
@@ -141,6 +141,7 @@ socket.on('connect', () => {
     connectionStatus.textContent = 'Status: Connected';
     
     // Measure ping on connection
+    console.log("Starting ping measurements after connection");
     measurePing();
     
     // Make sure we're showing the lobby screen
@@ -188,15 +189,6 @@ socket.on('player_left', (data) => {
             isHost = true;
             updateHostUI();
         }
-    }
-});
-
-// Ping measurement
-socket.on('pong', () => {
-    if (lastPingTime > 0) {
-        const endTime = performance.now();
-        ping = Math.round(endTime - lastPingTime);
-        updatePingDisplay();
     }
 });
 
@@ -429,15 +421,27 @@ function showWaitingLobby() {
 
 function measurePing() {
     if (connected) {
+        console.log("Measuring ping...");
         lastPingTime = performance.now();
         socket.emit('ping', {}, (response) => {
-            const endTime = performance.now();
-            ping = Math.round(endTime - lastPingTime);
-            updatePingDisplay();
+            if (!response) {
+                console.error("No response received from ping");
+                ping = 0;
+            } else {
+                const endTime = performance.now();
+                ping = Math.round(endTime - lastPingTime);
+                console.log(`Received ping response: ${JSON.stringify(response)}`);
+                console.log(`Round-trip time: ${ping}ms`);
+                updatePingDisplay();
+            }
             
             // Schedule next ping measurement
             setTimeout(measurePing, PING_INTERVAL);
         });
+    } else {
+        // If not connected, try again later when we might be connected
+        console.log("Not connected, scheduling ping measurement retry");
+        setTimeout(measurePing, PING_INTERVAL);
     }
 }
 

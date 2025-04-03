@@ -746,8 +746,14 @@ def update_position(sid, data):
 @sio.event
 def ping(sid):
     """Respond to ping requests from clients"""
-    # Simply respond to the event, client will calculate ping based on round-trip time
-    return {"status": "pong"}
+    # Log ping requests to help with debugging
+    print(f"Received ping request from client {sid}")
+    # Return a more detailed response with timestamp
+    return {
+        "status": "pong",
+        "server_time": time.time(),
+        "message": "Ping response from server"
+    }
 
 # Function to clean up inactive rooms
 def cleanup_inactive_rooms():
