@@ -31,7 +31,7 @@ pip install -r requirements.txt
 1. Start the server:
 ```
 cd server
-python server.py
+python src/server.py
 ```
 
 2. Open the web client in your browser by opening web/index.html
