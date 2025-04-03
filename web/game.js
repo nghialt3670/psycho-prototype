@@ -1,5 +1,5 @@
 // Configuration
-const SERVER_URL = 'http://localhost:5000';
+const SERVER_URL = 'https://psycho.vuhuydiet.xyz';
 
 // Canvas setup
 const canvas = document.getElementById('game-canvas');
