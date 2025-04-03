@@ -561,20 +561,27 @@ def join_room(sid, data):
 @sio.event
 def leave_room(sid, data, callback=None):
     """Allow a player to leave a room with proper callback"""
+    print(f"Player {sid} attempting to leave room")
+    
     if sid not in players:
+        print(f"Player {sid} not found in players dictionary")
         if callback:
             callback({'success': False, 'message': 'Player not found'})
         return {'success': False, 'message': 'Player not found'}
     
     # Check if player has a room value at all
     if 'room' not in players[sid] or players[sid]['room'] is None:
+        print(f"Player {sid} has no room assigned")
         if callback:
             callback({'success': True, 'message': 'Already left room'})
         return {'success': True, 'message': 'Already left room'}
     
     room_name = players[sid]['room']
+    print(f"Player {sid} attempting to leave room: {room_name}")
+    
     if not room_name:
         # Player has empty room name - consider them already out of room
+        print(f"Player {sid} has empty room name")
         players[sid]['room'] = None
         players[sid]['is_host'] = False
         if callback:
@@ -583,6 +590,7 @@ def leave_room(sid, data, callback=None):
     
     # Check if room exists
     if room_name not in rooms:
+        print(f"Room {room_name} does not exist")
         # Room doesn't exist - reset player's room status and return success
         players[sid]['room'] = None
         players[sid]['is_host'] = False
@@ -590,9 +598,20 @@ def leave_room(sid, data, callback=None):
             callback({'success': True, 'message': 'Room no longer exists'})
         return {'success': True, 'message': 'Room no longer exists'}
     
+    # Check if player is actually in the room they're trying to leave
+    if sid not in rooms[room_name]:
+        print(f"Player {sid} not found in room {room_name}")
+        # Player not in the specified room - fix their state and return success
+        players[sid]['room'] = None
+        players[sid]['is_host'] = False
+        if callback:
+            callback({'success': True, 'message': 'Already left room'})
+        return {'success': True, 'message': 'Already left room'}
+    
     # Remove player from room
     rooms[room_name].remove(sid)
     is_host = sid == room_hosts.get(room_name)
+    print(f"Removed player {sid} from room {room_name}, was host: {is_host}")
     
     # If room is now empty, delete it and free the room name
     if len(rooms[room_name]) == 0:
@@ -636,7 +655,7 @@ def leave_room(sid, data, callback=None):
     players[sid]['room'] = None
     players[sid]['is_host'] = False
     
-    print(f"Player {players[sid]['username']} left room {room_name}")
+    print(f"Player {sid} ({players[sid]['username'] if 'username' in players[sid] else 'unknown'}) successfully left room {room_name}")
     
     # Send success response via callback if provided
     if callback:
