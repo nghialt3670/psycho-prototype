@@ -1014,22 +1014,35 @@ startGameBtn.addEventListener('click', () => {
 leaveRoomBtn.addEventListener('click', () => {
     console.log("Leave Room button clicked", { connected, inWaitingLobby, inRoom });
     
-    if (connected && (inWaitingLobby || inRoom)) {
-        console.log("Emitting leave_room event");
-        socket.emit('leave_room', {}, (result) => {
-            console.log("Received leave_room response:", result);
-            if (result && result.success) {
-                console.log("Left room:", result);
+    // Client-side validation before attempting to leave
+    if (!connected) {
+        console.warn("Cannot leave room: not connected to server");
+        return;
+    }
+    
+    // We attempt to leave even if client thinks we're not in a room
+    // This helps sync client and server state in edge cases
+    console.log("Emitting leave_room event");
+    socket.emit('leave_room', {}, (result) => {
+        console.log("Received leave_room response:", result);
+        if (result && result.success) {
+            console.log("Left room:", result);
+            resetGameState();
+            showLobby();
+        } else {
+            console.error("Failed to leave room:", result);
+            
+            // If we get a "Not in a room" error, assume we're already out
+            // and reset the client state anyway to prevent UI getting stuck
+            if (result && result.message === "Not in a room") {
+                console.log("Client thinks we're in a room but server disagrees. Resetting state anyway.");
                 resetGameState();
                 showLobby();
             } else {
-                console.error("Failed to leave room:", result);
                 alert(`Failed to leave room: ${result?.message || 'Unknown error'}`);
             }
-        });
-    } else {
-        console.warn("Cannot leave room: conditions not met", { connected, inWaitingLobby, inRoom });
-    }
+        }
+    });
 });
 
 // Keyboard input
@@ -1047,9 +1060,20 @@ document.addEventListener('keydown', (event) => {
         } else if (inWaitingLobby) {
             // If in waiting lobby, leave room and return to main lobby
             socket.emit('leave_room', {}, (result) => {
+                console.log("Escape key leave room result:", result);
                 if (result && result.success) {
                     resetGameState();
                     showLobby();
+                } else {
+                    // If we get a "Not in a room" error, assume we're already out
+                    // and reset the client state anyway to prevent UI getting stuck
+                    if (result && result.message === "Not in a room") {
+                        console.log("Client thinks we're in a room but server disagrees. Resetting state anyway.");
+                        resetGameState();
+                        showLobby();
+                    } else {
+                        alert(`Failed to leave room: ${result?.message || 'Unknown error'}`);
+                    }
                 }
             });
         }
@@ -1100,19 +1124,31 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log("Adding event listener to Leave Room button");
         leaveRoomBtn.addEventListener('click', function() {
             console.log("Leave Room button clicked through direct binding");
-            if (connected && (inWaitingLobby || inRoom)) {
-                socket.emit('leave_room', {}, (result) => {
-                    console.log("Leave room result:", result);
-                    if (result && result.success) {
+            // Client-side validation before attempting to leave
+            if (!connected) {
+                console.warn("Cannot leave room: not connected to server");
+                return;
+            }
+            
+            // We attempt to leave even if client thinks we're not in a room
+            // This helps sync client and server state in edge cases
+            socket.emit('leave_room', {}, (result) => {
+                console.log("Leave room result:", result);
+                if (result && result.success) {
+                    resetGameState();
+                    showLobby();
+                } else {
+                    // If we get a "Not in a room" error, assume we're already out
+                    // and reset the client state anyway to prevent UI getting stuck
+                    if (result && result.message === "Not in a room") {
+                        console.log("Client thinks we're in a room but server disagrees. Resetting state anyway.");
                         resetGameState();
                         showLobby();
                     } else {
                         alert(`Failed to leave room: ${result?.message || 'Unknown error'}`);
                     }
-                });
-            } else {
-                console.warn("Cannot leave room: conditions not met", { connected, inWaitingLobby, inRoom });
-            }
+                }
+            });
         });
     } else {
         console.error("Leave Room button not found in DOM");

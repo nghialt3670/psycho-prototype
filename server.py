@@ -566,11 +566,29 @@ def leave_room(sid, data, callback=None):
             callback({'success': False, 'message': 'Player not found'})
         return {'success': False, 'message': 'Player not found'}
     
-    room_name = players[sid]['room']
-    if not room_name or room_name not in rooms:
+    # Check if player has a room value at all
+    if 'room' not in players[sid] or players[sid]['room'] is None:
         if callback:
-            callback({'success': False, 'message': 'Not in a room'})
-        return {'success': False, 'message': 'Not in a room'}
+            callback({'success': True, 'message': 'Already left room'})
+        return {'success': True, 'message': 'Already left room'}
+    
+    room_name = players[sid]['room']
+    if not room_name:
+        # Player has empty room name - consider them already out of room
+        players[sid]['room'] = None
+        players[sid]['is_host'] = False
+        if callback:
+            callback({'success': True, 'message': 'Already left room'})
+        return {'success': True, 'message': 'Already left room'}
+    
+    # Check if room exists
+    if room_name not in rooms:
+        # Room doesn't exist - reset player's room status and return success
+        players[sid]['room'] = None
+        players[sid]['is_host'] = False
+        if callback:
+            callback({'success': True, 'message': 'Room no longer exists'})
+        return {'success': True, 'message': 'Room no longer exists'}
     
     # Remove player from room
     rooms[room_name].remove(sid)
