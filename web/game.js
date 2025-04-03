@@ -25,6 +25,7 @@ let playerX = MAP_WIDTH / 4;
 let playerY = MAP_HEIGHT / 4;
 const playerSpeed = 5;
 let playerColor = null;
+let playerUsername = ""; // Added player username
 
 // Camera system
 let cameraX = 0;
@@ -45,7 +46,8 @@ const localPlayer = {
     x: 0,
     y: 0,
     color: null,
-    positionIndex: -1
+    positionIndex: -1,
+    username: "" // Added username field
 };
 
 // Movement and rendering settings
@@ -92,6 +94,7 @@ document.addEventListener('keydown', (e) => {
 const lobbyScreen = document.getElementById('lobby');
 const gameScreen = document.getElementById('game');
 const roomNameInput = document.getElementById('room-name');
+const usernameInput = document.getElementById('username'); // Add username input reference
 const createRoomBtn = document.getElementById('create-room');
 const joinRoomBtn = document.getElementById('join-room');
 const connectionStatus = document.getElementById('connection-status');
@@ -101,7 +104,7 @@ const fpsDisplay = document.getElementById('fps');
 const pingDisplay = document.getElementById('ping');
 
 console.log("Initializing UI elements:", {
-    lobbyScreen, gameScreen, roomNameInput, createRoomBtn, joinRoomBtn,
+    lobbyScreen, gameScreen, roomNameInput, usernameInput, createRoomBtn, joinRoomBtn,
     connectionStatus, currentRoomDisplay, playerCountDisplay, fpsDisplay, pingDisplay
 });
 
@@ -239,6 +242,9 @@ function processGameState(data) {
             const colorArray = playerInfo.color;
             const cssColor = `rgb(${colorArray[0]}, ${colorArray[1]}, ${colorArray[2]})`;
             
+            // Get username from player info, with default if not provided
+            const username = playerInfo.username || `Player ${positionIndex + 1}`;
+            
             // Initialize rendering position if this is a new player
             if (!remotePlayerRendering[positionIndex]) {
                 remotePlayerRendering[positionIndex] = {
@@ -247,11 +253,13 @@ function processGameState(data) {
                     color: cssColor,
                     lastX: playerInfo.x,
                     lastY: playerInfo.y,
-                    lastUpdateTime: now
+                    lastUpdateTime: now,
+                    username: username
                 };
             } else {
-                // Update color in case it changed
+                // Update color and username in case they changed
                 remotePlayerRendering[positionIndex].color = cssColor;
+                remotePlayerRendering[positionIndex].username = username;
                 
                 // For fast-moving players, update position history
                 const renderPos = remotePlayerRendering[positionIndex];
@@ -265,6 +273,7 @@ function processGameState(data) {
                 x: playerInfo.x,
                 y: playerInfo.y,
                 color: cssColor,
+                username: username,
                 time: now
             };
         }
@@ -357,8 +366,12 @@ function sendPositionUpdate(x, y) {
             localPlayer.x = x;
             localPlayer.y = y;
             
-            // Send to server (push model)
-            socket.emit('update_position', { x, y });
+            // Send to server (push model) with username
+            socket.emit('update_position', { 
+                x, 
+                y,
+                username: playerUsername 
+            });
             lastPositionUpdateTime = performance.now();
         } catch (e) {
             console.error("Error sending position update:", e);
@@ -548,7 +561,7 @@ function drawWall(wall) {
     }
 }
 
-function drawPlayer(x, y, color, isLocal = false) {
+function drawPlayer(x, y, color, isLocal = false, username) {
     // Convert to screen coordinates
     const screen = worldToScreen(x, y);
     
@@ -599,6 +612,26 @@ function drawPlayer(x, y, color, isLocal = false) {
     ctx.beginPath();
     ctx.arc(screen.x + PLAYER_SIZE / 2, smileY, smileWidth / 2, 0, Math.PI);
     ctx.stroke();
+    
+    // Draw username above player
+    if (username) {
+        const nameX = screen.x + PLAYER_SIZE / 2;
+        const nameY = screen.y;
+        
+        // Create name tag
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.font = 'bold 14px Arial';
+        const textWidth = ctx.measureText(username).width;
+        
+        // Draw name tag background
+        ctx.fillRect(nameX - textWidth / 2 - 4, nameY - 25, textWidth + 8, 20);
+        
+        // Draw name text
+        ctx.fillStyle = 'white';
+        ctx.textAlign = 'center';
+        ctx.fillText(username, nameX, nameY - 10);
+        ctx.textAlign = 'left'; // Reset text alignment
+    }
 }
 
 function drawMiniMap() {
@@ -707,14 +740,15 @@ function drawGame() {
                 renderPos.x, 
                 renderPos.y, 
                 renderPos.color, 
-                false
+                false,
+                renderPos.username // Pass username to draw function
             );
         }
     }
     
     // Draw local player last (on top)
     if (localPlayer.color) {
-        drawPlayer(playerX, playerY, localPlayer.color, true);
+        drawPlayer(playerX, playerY, localPlayer.color, true, localPlayer.username);
     }
     
     // Draw mini-map
@@ -773,10 +807,17 @@ function gameLoop(currentTime) {
 // UI Button event handlers
 createRoomBtn.addEventListener('click', () => {
     if (connected && roomNameInput.value.trim()) {
+        // Get username, default if empty
+        playerUsername = usernameInput.value.trim() || `Player${Math.floor(Math.random() * 1000)}`;
+        localPlayer.username = playerUsername;
+        
         resetGameState();
         roomName = roomNameInput.value.trim();
         
-        socket.emit('create_room', {room_name: roomName}, (result) => {
+        socket.emit('create_room', {
+            room_name: roomName,
+            username: playerUsername
+        }, (result) => {
             if (result && result.success) {
                 console.log("Room created successfully:", result);
                 inRoom = true;
@@ -807,15 +848,26 @@ createRoomBtn.addEventListener('click', () => {
                 alert(`Failed to create room: ${result?.message || 'Unknown error'}`);
             }
         });
+    } else if (!usernameInput.value.trim()) {
+        alert("Please enter a username");
+    } else if (!roomNameInput.value.trim()) {
+        alert("Please enter a room name");
     }
 });
 
 joinRoomBtn.addEventListener('click', () => {
     if (connected && roomNameInput.value.trim()) {
+        // Get username, default if empty
+        playerUsername = usernameInput.value.trim() || `Player${Math.floor(Math.random() * 1000)}`;
+        localPlayer.username = playerUsername;
+        
         resetGameState();
         roomName = roomNameInput.value.trim();
         
-        socket.emit('join_room', {room_name: roomName}, (result) => {
+        socket.emit('join_room', {
+            room_name: roomName,
+            username: playerUsername
+        }, (result) => {
             if (result && result.success) {
                 console.log("Room joined successfully:", result);
                 inRoom = true;
@@ -846,6 +898,10 @@ joinRoomBtn.addEventListener('click', () => {
                 alert(`Failed to join room: ${result?.message || 'Unknown error'}`);
             }
         });
+    } else if (!usernameInput.value.trim()) {
+        alert("Please enter a username");
+    } else if (!roomNameInput.value.trim()) {
+        alert("Please enter a room name");
     }
 });
 

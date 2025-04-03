@@ -364,7 +364,8 @@ def get_room_game_state(room_name):
                 'x': players[player_sid]['x'],
                 'y': players[player_sid]['y'],
                 'color': players[player_sid]['color'],
-                'position_index': players[player_sid]['position_index']  # Include position index
+                'position_index': players[player_sid]['position_index'],  # Include position index
+                'username': players[player_sid]['username']  # Include username
             }
     
     return game_state
@@ -409,7 +410,8 @@ def connect(sid, environ):
         'room': None,
         'color': None,
         'size': PLAYER_SIZE,
-        'position_index': -1  # Will be set when joining a room
+        'position_index': -1,  # Will be set when joining a room
+        'username': None  # Will be set when joining a room
     }
 
 @sio.event
@@ -442,6 +444,8 @@ def disconnect(sid):
 @sio.event
 def create_room(sid, data):
     room_name = data.get('room_name')
+    username = data.get('username', f'Player {sid[:5]}')  # Get username or use default
+    
     if not room_name:
         return {'success': False, 'message': 'Room name is required'}
     
@@ -451,6 +455,7 @@ def create_room(sid, data):
     # Create new room with this player as first member
     rooms[room_name] = [sid]
     players[sid]['room'] = room_name
+    players[sid]['username'] = username  # Store the username
     
     # Assign first position and color
     position_index, color_index = 0, 0  # First player gets first position/color
@@ -471,11 +476,12 @@ def create_room(sid, data):
             'x': start_x,
             'y': start_y,
             'color': player_colors[color_index],
-            'position_index': position_index
+            'position_index': position_index,
+            'username': username  # Include username in game state
         }
     }
     
-    print(f"Room '{room_name}' created by {sid} (position {position_index})")
+    print(f"Room '{room_name}' created by {username} (SID: {sid}, position {position_index})")
     
     # Return success with room data
     return {
@@ -492,6 +498,8 @@ def create_room(sid, data):
 @sio.event
 def join_room(sid, data):
     room_name = data.get('room_name')
+    username = data.get('username', f'Player {sid[:5]}')  # Get username or use default
+    
     if not room_name:
         return {'success': False, 'message': 'Room name is required'}
     
@@ -501,6 +509,7 @@ def join_room(sid, data):
     # Add player to room
     rooms[room_name].append(sid)
     players[sid]['room'] = room_name
+    players[sid]['username'] = username  # Store the username
     
     # Determine position and color based on existing players
     position_index, color_index = get_next_player_position(room_name)
@@ -523,7 +532,7 @@ def join_room(sid, data):
     # Push-based model: Immediately broadcast the updated game state to all players
     broadcast_game_state(room_name)
     
-    print(f"Player {sid} joined room '{room_name}' as position {position_index} with {len(rooms[room_name])} total players")
+    print(f"Player {username} (SID: {sid}) joined room '{room_name}' as position {position_index} with {len(rooms[room_name])} total players")
     
     # Return success with room data
     return {
@@ -559,6 +568,10 @@ def update_position(sid, data):
     new_y = data.get('y')
     velocity_x = data.get('vx', 0)
     velocity_y = data.get('vy', 0)
+    
+    # Update username if provided
+    if 'username' in data and data['username']:
+        players[sid]['username'] = data['username']
     
     if new_x is not None and new_y is not None:
         players[sid]['x'] = new_x
