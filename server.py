@@ -365,7 +365,7 @@ def broadcast_game_state(room_name, exclude_sid=None):
     game_state = get_room_game_state(room_name)
     
     for player_sid in rooms[room_name]:
-        if player_sid != exclude_sid and player_sid in players:
+        if player_sid in players:
             sio.emit('game_state', game_state, room=player_sid)
 
 def get_next_player_position(room_name):
@@ -550,22 +550,12 @@ def update_position(sid, data):
     if not room or room not in rooms or sid not in rooms[room]:
         return {'success': False, 'message': 'Not in a valid room'}
     
-    # Check for small position changes that might be jitter
-    # Don't broadcast these minor updates to reduce network traffic
-    JITTER_THRESHOLD = 0.5  # pixels
-    curr_x = players[sid]['x']
-    curr_y = players[sid]['y']
-    dx = abs(new_x - curr_x)
-    dy = abs(new_y - curr_y)
-    
     # Update position (no collision detection on server - client handles this)
     players[sid]['x'] = new_x
     players[sid]['y'] = new_y
     
-    # Only broadcast significant position changes
-    if dx > JITTER_THRESHOLD or dy > JITTER_THRESHOLD:
-        # Broadcast updated game state to all other players
-        broadcast_game_state(room, exclude_sid=sid)
+    # Always broadcast immediately without any filtering to ensure accuracy
+    broadcast_game_state(room)
     
     return {'success': True}
 
