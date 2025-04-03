@@ -1,5 +1,5 @@
 // Configuration
-const SERVER_URL = 'http://psycho.vuhuydiet.xyz:5000';
+const SERVER_URL = 'https://psycho.vuhuydiet.xyz:5000';
 
 // Canvas setup
 const canvas = document.getElementById('game-canvas');
@@ -49,12 +49,16 @@ const localPlayer = {
 };
 
 // Movement and rendering settings
-const MOVEMENT_SMOOTHING = 0.25; // Balanced smoothing
+const REMOTE_PLAYER_SPEED = 8; // Balanced constant speed (pixels per frame)
+const MOVEMENT_SMOOTHING = 0.15; // Only used for minor adjustments
+const MIN_SMOOTHING = 0.1; 
+const MAX_SMOOTHING = 0.4;
 let lastPositionUpdateTime = 0;
 
 // Remote player tracking
 const remotePositions = {}; // Latest server positions
 const remotePlayerRendering = {}; // Current render positions with smoothing
+const remotePlayerVelocity = {}; // Track velocity for each player
 
 // Key state
 const keys = {
@@ -208,10 +212,7 @@ function processGameState(data) {
         return;
     }
     
-    // Clear old remote positions to prevent ghost players
-    for (const key in remotePositions) {
-        delete remotePositions[key];
-    }
+    const now = performance.now(); // Current time for timestamping
     
     // Process all players from the game state
     Object.entries(data).forEach(([sid, playerInfo]) => {
@@ -243,19 +244,39 @@ function processGameState(data) {
                 remotePlayerRendering[positionIndex] = {
                     x: playerInfo.x,
                     y: playerInfo.y,
-                    color: cssColor
+                    color: cssColor,
+                    lastX: playerInfo.x,
+                    lastY: playerInfo.y,
+                    lastUpdateTime: now
                 };
             } else {
                 // Update color in case it changed
                 remotePlayerRendering[positionIndex].color = cssColor;
+                
+                // For fast-moving players, update position history
+                const renderPos = remotePlayerRendering[positionIndex];
+                renderPos.lastX = renderPos.x;
+                renderPos.lastY = renderPos.y;
+                renderPos.lastUpdateTime = now;
             }
             
-            // Store latest position from server
+            // Store latest position from server with timestamp
             remotePositions[positionIndex] = {
                 x: playerInfo.x,
                 y: playerInfo.y,
-                color: cssColor
+                color: cssColor,
+                time: now
             };
+        }
+    });
+    
+    // Clean up any missing players
+    Object.keys(remotePositions).forEach(idx => {
+        if (!Object.entries(data).some(([_, info]) => 
+            info && info.position_index == idx && 
+            info.position_index !== localPlayer.positionIndex)) {
+            delete remotePositions[idx];
+            delete remotePlayerRendering[idx];
         }
     });
     
@@ -449,7 +470,10 @@ function updateLocalPlayerPosition() {
     };
 }
 
-function updateRemotePlayers() {
+function updateRemotePlayers(deltaTime) {
+    // Process movement updates with constant speed
+    if (!inRoom) return;
+    
     // Smooth movement for all remote players
     for (const idx in remotePositions) {
         // Get the current rendering position and the target position
@@ -460,18 +484,29 @@ function updateRemotePlayers() {
             // Calculate distance to target
             const dx = targetPos.x - renderPos.x;
             const dy = targetPos.y - renderPos.y;
-            
-            // Apply distance-based adaptive smoothing
-            // (Larger distances move faster to catch up)
             const distance = Math.sqrt(dx*dx + dy*dy);
-            const adaptiveFactor = Math.min(distance / 200, 1) * MOVEMENT_SMOOTHING;
             
-            // Apply smoothing with minimum threshold to prevent jitter
-            if (Math.abs(dx) > 0.1) {
-                renderPos.x += dx * (adaptiveFactor + 0.1);
+            // If very close to target, just snap to it
+            if (distance <= 1) {
+                renderPos.x = targetPos.x;
+                renderPos.y = targetPos.y;
+                continue;
             }
-            if (Math.abs(dy) > 0.1) {
-                renderPos.y += dy * (adaptiveFactor + 0.1);
+            
+            // Calculate movement for this frame with constant speed
+            // Normalize for consistent frame rate (60fps)
+            const moveDistance = REMOTE_PLAYER_SPEED * (deltaTime * 60);
+            
+            // If we can reach target this frame, just go there
+            if (moveDistance >= distance) {
+                renderPos.x = targetPos.x;
+                renderPos.y = targetPos.y;
+            } else {
+                // Otherwise move with constant speed in direction of target
+                // This ensures perfectly uniform movement speed
+                const moveRatio = moveDistance / distance;
+                renderPos.x += dx * moveRatio;
+                renderPos.y += dy * moveRatio;
             }
         }
     }
@@ -636,7 +671,7 @@ function drawNetworkDebug() {
     ctx.fillText(`Remote Players: ${remotePlayerCount}`, debugX + 10, debugY + lineHeight * 2);
     ctx.fillText(`Position Updates: Immediate`, debugX + 10, debugY + lineHeight * 3);
     ctx.fillText(`Server Model: Push-based (Broadcast)`, debugX + 10, debugY + lineHeight * 4);
-    ctx.fillText(`Smoothing Factor: ${MOVEMENT_SMOOTHING}`, debugX + 10, debugY + lineHeight * 5);
+    ctx.fillText(`Movement: Uniform ${REMOTE_PLAYER_SPEED}px/frame`, debugX + 10, debugY + lineHeight * 5);
 }
 
 function drawGame() {
@@ -721,7 +756,7 @@ function gameLoop(currentTime) {
         }
         
         // Update remote player positions with smoothing
-        updateRemotePlayers();
+        updateRemotePlayers(deltaTime);
         
         // Draw the game - only if we're actually in the game
         drawGame();
