@@ -550,12 +550,17 @@ def join_room(sid, data):
     }
 
 @sio.event
-def leave_room(sid):
+def leave_room(sid, data, callback=None):
+    """Allow a player to leave a room with proper callback"""
     if sid not in players:
+        if callback:
+            callback({'success': False, 'message': 'Player not found'})
         return {'success': False, 'message': 'Player not found'}
     
     room_name = players[sid]['room']
     if not room_name or room_name not in rooms:
+        if callback:
+            callback({'success': False, 'message': 'Not in a room'})
         return {'success': False, 'message': 'Not in a room'}
     
     # Remove player from room
@@ -601,19 +606,30 @@ def leave_room(sid):
     players[sid]['is_host'] = False
     
     print(f"Player {players[sid]['username']} left room {room_name}")
+    
+    # Send success response via callback if provided
+    if callback:
+        callback({'success': True, 'message': 'Left room'})
     return {'success': True, 'message': 'Left room'}
 
 @sio.event
-def start_game(sid):
+def start_game(sid, data, callback=None):
+    """Start the game in a room with proper callback"""
     if sid not in players:
+        if callback:
+            callback({'success': False, 'message': 'Player not found'})
         return {'success': False, 'message': 'Player not found'}
     
     room_name = players[sid]['room']
     if not room_name or room_name not in rooms:
+        if callback:
+            callback({'success': False, 'message': 'Not in a room'})
         return {'success': False, 'message': 'Not in a room'}
     
     # Only host can start the game
     if sid != room_hosts.get(room_name):
+        if callback:
+            callback({'success': False, 'message': 'Only the host can start the game'})
         return {'success': False, 'message': 'Only the host can start the game'}
     
     # Mark game as started
@@ -630,6 +646,10 @@ def start_game(sid):
         }, room=player_sid)
     
     print(f"Game started in room {room_name} by host {players[sid]['username']}")
+    
+    # Send success response via callback
+    if callback:
+        callback({'success': True, 'message': 'Game started'})
     return {'success': True, 'message': 'Game started'}
 
 @sio.event

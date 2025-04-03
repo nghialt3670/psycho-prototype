@@ -947,16 +947,6 @@ joinRoomBtn.addEventListener('click', () => {
             if (result && result.success) {
                 console.log("Room joined successfully:", result);
                 
-                // Check if game has already started
-                if (result.game_started) {
-                    inRoom = true;
-                    gameStarted = true;
-                } else {
-                    inWaitingLobby = true;
-                }
-                
-                inLobby = false;
-                
                 // Store local player data
                 if (Array.isArray(result.color)) {
                     localPlayer.color = `rgb(${result.color[0]}, ${result.color[1]}, ${result.color[2]})`;
@@ -979,12 +969,15 @@ joinRoomBtn.addEventListener('click', () => {
                     updatePlayerListUI(result.player_list);
                 }
                 
-                // Switch to waiting lobby or game screen
-                if (result.game_started) {
-                    showGame();
-                } else {
-                    showWaitingLobby();
-                }
+                // Always go to waiting lobby first regardless of whether we're host or not
+                // The game_started event will move us to the game when the host starts it
+                inLobby = false;
+                inWaitingLobby = true;
+                inRoom = false; // Make sure we're not in game mode
+                gameStarted = false; // Game not started yet for this client
+                
+                // Show the waiting lobby screen
+                showWaitingLobby();
             } else {
                 alert(`Failed to join room: ${result?.message || 'Unknown error'}`);
             }
@@ -998,30 +991,44 @@ joinRoomBtn.addEventListener('click', () => {
 
 // Start game button (host only)
 startGameBtn.addEventListener('click', () => {
+    console.log("Start Game button clicked", { connected, inWaitingLobby, isHost });
+    
     if (connected && inWaitingLobby && isHost) {
+        console.log("Emitting start_game event");
         socket.emit('start_game', {}, (result) => {
+            console.log("Received start_game response:", result);
             if (result && result.success) {
                 console.log("Starting game:", result);
                 // Server will send game_started event to all players
             } else {
+                console.error("Failed to start game:", result);
                 alert(`Failed to start game: ${result?.message || 'Unknown error'}`);
             }
         });
+    } else {
+        console.warn("Cannot start game: conditions not met", { connected, inWaitingLobby, isHost });
     }
 });
 
 // Leave room button
 leaveRoomBtn.addEventListener('click', () => {
+    console.log("Leave Room button clicked", { connected, inWaitingLobby, inRoom });
+    
     if (connected && (inWaitingLobby || inRoom)) {
+        console.log("Emitting leave_room event");
         socket.emit('leave_room', {}, (result) => {
+            console.log("Received leave_room response:", result);
             if (result && result.success) {
                 console.log("Left room:", result);
                 resetGameState();
                 showLobby();
             } else {
+                console.error("Failed to leave room:", result);
                 alert(`Failed to leave room: ${result?.message || 'Unknown error'}`);
             }
         });
+    } else {
+        console.warn("Cannot leave room: conditions not met", { connected, inWaitingLobby, inRoom });
     }
 });
 
@@ -1058,6 +1065,58 @@ document.addEventListener('keyup', (event) => {
 // DOM ready check
 document.addEventListener('DOMContentLoaded', function() {
     console.log("DOM fully loaded");
+    
+    // Debug DOM elements existence
+    console.log("Checking critical DOM elements:");
+    console.log("Start Game button:", startGameBtn);
+    console.log("Leave Room button:", leaveRoomBtn);
+    console.log("Host controls:", hostControls);
+    console.log("Guest waiting message:", guestWaitingMessage);
+    console.log("Waiting players list:", waitingPlayersList);
+    
+    // Reinitialize button event listeners
+    if (startGameBtn) {
+        console.log("Adding event listener to Start Game button");
+        startGameBtn.addEventListener('click', function() {
+            console.log("Start Game button clicked through direct binding");
+            if (connected && inWaitingLobby && isHost) {
+                socket.emit('start_game', {}, (result) => {
+                    console.log("Start game result:", result);
+                    if (result && result.success) {
+                        console.log("Game starting initiated");
+                    } else {
+                        alert(`Failed to start game: ${result?.message || 'Unknown error'}`);
+                    }
+                });
+            } else {
+                console.warn("Cannot start game: conditions not met", { connected, inWaitingLobby, isHost });
+            }
+        });
+    } else {
+        console.error("Start Game button not found in DOM");
+    }
+    
+    if (leaveRoomBtn) {
+        console.log("Adding event listener to Leave Room button");
+        leaveRoomBtn.addEventListener('click', function() {
+            console.log("Leave Room button clicked through direct binding");
+            if (connected && (inWaitingLobby || inRoom)) {
+                socket.emit('leave_room', {}, (result) => {
+                    console.log("Leave room result:", result);
+                    if (result && result.success) {
+                        resetGameState();
+                        showLobby();
+                    } else {
+                        alert(`Failed to leave room: ${result?.message || 'Unknown error'}`);
+                    }
+                });
+            } else {
+                console.warn("Cannot leave room: conditions not met", { connected, inWaitingLobby, inRoom });
+            }
+        });
+    } else {
+        console.error("Leave Room button not found in DOM");
+    }
     
     // Force initial display state
     showLobby();
