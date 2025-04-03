@@ -3,3 +3,4 @@ eventlet==0.33.3
 pygame==2.5.0
 requests==2.31.0
 python-dotenv==1.0.0
+aiohttp==3.11.16
