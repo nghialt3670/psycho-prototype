@@ -26,7 +26,7 @@ let gameStarted = false; // Whether the game has started
 const PLAYER_SIZE = 40;
 let playerX = MAP_WIDTH / 4;
 let playerY = MAP_HEIGHT / 4;
-const playerSpeed = 5;
+const playerSpeed = 3;
 let playerColor = null;
 let playerUsername = ""; // Added player username
 

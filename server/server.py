@@ -9,12 +9,9 @@ This server implements a push-based multiplayer model:
 """
 
 import os
-import random
 import socketio
-from aiohttp import web
 import eventlet
 from eventlet import wsgi
-import json
 import time
 
 # Create a Socket.IO server
