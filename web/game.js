@@ -1,5 +1,5 @@
 // Configuration
-const SERVER_URL = 'http://psycho.vuhuydiet.xyz:5000';
+const SERVER_URL = 'https://psycho.vuhuydiet.xyz';
 
 // Canvas setup
 const canvas = document.getElementById('game-canvas');
@@ -124,7 +124,13 @@ console.log("Initializing UI elements:", {
 // =============================================
 
 // Create the socket connection
-const socket = io(SERVER_URL);
+
+const socket = io(SERVER_URL, {
+    // Recommended configuration options:
+    secure: true, // Ensures HTTPS connection
+    // transports: ['websocket'], // Force WebSocket transport
+    rejectUnauthorized: true // Verify SSL certificate (default)
+  });
 
 // Connection events
 socket.on('connect', () => {
