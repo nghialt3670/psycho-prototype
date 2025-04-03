@@ -9,15 +9,20 @@ A basic multiplayer top-down game where 2 players control squares and move aroun
 - Basic lobby system
 - Random walls that players can't pass through
 
+## Project Structure
+- `server/`: Server code and deployment files
+- `web/`: Web client code
+
 ## Requirements
 - Python 3.7+
-- Required libraries specified in requirements.txt
+- Required libraries specified in server/requirements.txt
 
 ## Installation
 
 1. Clone this repository
 2. Install the required packages:
 ```
+cd server
 pip install -r requirements.txt
 ```
 
@@ -25,15 +30,13 @@ pip install -r requirements.txt
 
 1. Start the server:
 ```
+cd server
 python server.py
 ```
 
-2. Start the client (in a separate terminal):
-```
-python client.py
-```
+2. Open the web client in your browser by opening web/index.html
 
-3. For multiplayer, run another client instance in a different terminal.
+3. For multiplayer, share the server URL with other players.
 
 ## How to Play
 
@@ -58,17 +61,23 @@ A Socket.IO based server for the multiplayer labyrinth game.
 
 ### Running with Docker
 
-1. Pull and run the Docker image:
+1. Build and run using docker-compose:
+   ```
+   cd server
+   docker-compose up -d
+   ```
+
+2. Or pull and run the Docker image directly:
    ```
    docker run -d --name labyrinth-server -p 5000:5000/tcp -p 5000:5000/udp --restart unless-stopped yourusername/labyrinth-server:latest
    ```
 
-2. Stop the container:
+3. Stop the container:
    ```
    docker stop labyrinth-server
    ```
 
-3. Remove the container:
+4. Remove the container:
    ```
    docker rm labyrinth-server
    ```
@@ -76,9 +85,11 @@ A Socket.IO based server for the multiplayer labyrinth game.
 ## GitHub Actions Automated Deployment
 
 This project includes a GitHub Actions workflow that automatically:
-1. Builds the Docker image
+1. Builds the Docker image from the server directory
 2. Pushes it to Docker Hub
 3. Deploys to an AWS server
+
+The workflow is triggered only when changes are made to files in the server/ directory.
 
 ### Setup Requirements
 
@@ -92,7 +103,7 @@ To use the automated deployment, you need to add the following secrets to your G
 
 ### How It Works
 
-1. When you push to the main/master branch, the workflow automatically triggers
+1. When you push changes to the server directory on the main/master branch, the workflow automatically triggers
 2. The Docker image is built and pushed to Docker Hub
 3. The workflow connects to your AWS server via SSH using your PEM key
 4. It stops any existing container, pulls the latest image, and runs a new container with both TCP and UDP ports mapped
@@ -107,10 +118,7 @@ The server will be accessible at:
 - Local: http://localhost:5000
 - Network: http://<your-ip-address>:5000
 
-To connect from other machines, make sure to update the `.env` file on the client side to point to your server's IP address:
-```
-SERVER_URL=http://<your-ip-address>:5000
-```
+To connect from other machines, make sure to update the config in the web client to point to your server's IP address.
 
 **Important:** Always use `http://` and not `https://` in the SERVER_URL since this server doesn't have SSL configured.
 
@@ -123,7 +131,7 @@ SERVER_URL=http://<your-ip-address>:5000
 
 - Make sure port 5000 is not already in use on your system.
 
-- If you see SSL errors like `[SSL: WRONG_VERSION_NUMBER] wrong version number`, make sure your client's `.env` file uses `http://` and not `https://` in the SERVER_URL:
+- If you see SSL errors like `[SSL: WRONG_VERSION_NUMBER] wrong version number`, make sure your client uses `http://` and not `https://` in the SERVER_URL:
   ```
   # Correct
   SERVER_URL=http://3.27.193.248:5000

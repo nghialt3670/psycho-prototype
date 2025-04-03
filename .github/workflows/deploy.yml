@@ -1,8 +1,10 @@
-name: Build and Deploy
+name: Build and Deploy Server
 
 on:
   push:
     branches: [ main, master ]
+    paths:
+      - 'server/**'
   workflow_dispatch:
 
 jobs:
@@ -24,7 +26,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v4
         with:
-          context: .
+          context: ./server
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/labyrinth-server:latest
           cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/labyrinth-server:buildcache
