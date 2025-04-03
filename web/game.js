@@ -370,14 +370,19 @@ function updatePingDisplay() {
 
 function showLobby() {
     console.log("Showing lobby screen");
-    if (lobbyScreen && gameScreen) {
+    if (lobbyScreen && waitingLobbyScreen && gameScreen) {
         lobbyScreen.style.display = 'flex';
         lobbyScreen.classList.remove('hidden');
         
+        waitingLobbyScreen.style.display = 'none';
+        waitingLobbyScreen.classList.add('hidden');
+        
         gameScreen.style.display = 'none';
         gameScreen.classList.add('hidden');
+        
+        console.log("All screens updated: Lobby visible, waiting lobby and game hidden");
     } else {
-        console.error("Screen elements not found!", lobbyScreen, gameScreen);
+        console.error("Screen elements not found!", lobbyScreen, waitingLobbyScreen, gameScreen);
     }
 }
 
@@ -1027,7 +1032,11 @@ leaveRoomBtn.addEventListener('click', () => {
             console.log("Received leave_room response:", result);
             if (result && result.success) {
                 console.log("Left room successfully:", result);
+                // Force state reset and show lobby
                 resetGameState();
+                inLobby = true;
+                inWaitingLobby = false;
+                inRoom = false;
                 showLobby();
             } else {
                 console.error("Failed to leave room:", result);
@@ -1038,6 +1047,9 @@ leaveRoomBtn.addEventListener('click', () => {
                     result && result.message === "Already left room") {
                     console.log("Resetting client state to lobby");
                     resetGameState();
+                    inLobby = true;
+                    inWaitingLobby = false;
+                    inRoom = false;
                     showLobby();
                 } else {
                     alert(`Failed to leave room: ${result?.message || 'Unknown error'}`);
@@ -1068,6 +1080,9 @@ document.addEventListener('keydown', (event) => {
                 console.log("Escape key leave room result:", result);
                 if (result && result.success) {
                     resetGameState();
+                    inLobby = true;
+                    inWaitingLobby = false;
+                    inRoom = false;
                     showLobby();
                 } else {
                     // If we get a "Not in a room" error, assume we're already out
@@ -1076,6 +1091,9 @@ document.addEventListener('keydown', (event) => {
                         result && result.message === "Already left room") {
                         console.log("Resetting client state to lobby from Escape key");
                         resetGameState();
+                        inLobby = true;
+                        inWaitingLobby = false;
+                        inRoom = false;
                         showLobby();
                     } else {
                         alert(`Failed to leave room: ${result?.message || 'Unknown error'}`);
@@ -1126,35 +1144,10 @@ document.addEventListener('DOMContentLoaded', function() {
         console.error("Start Game button not found in DOM");
     }
     
+    // Just verify the Leave Room button exists but don't add another event listener
+    // since we already have one defined above
     if (leaveRoomBtn) {
-        console.log("Adding event listener to Leave Room button");
-        leaveRoomBtn.addEventListener('click', function() {
-            console.log("Leave Room button clicked through direct binding");
-            // Always attempt to leave regardless of client state
-            if (connected) {
-                console.log("Emitting leave_room event from DOM ready handler");
-                socket.emit('leave_room', {}, (result) => {
-                    console.log("Leave room result:", result);
-                    if (result && result.success) {
-                        resetGameState();
-                        showLobby();
-                    } else {
-                        // If we get a "Not in a room" error, assume we're already out
-                        // and reset the client state anyway to prevent UI getting stuck
-                        if (result && result.message === "Not in a room" || 
-                            result && result.message === "Already left room") {
-                            console.log("Client state reset to lobby");
-                            resetGameState();
-                            showLobby();
-                        } else {
-                            alert(`Failed to leave room: ${result?.message || 'Unknown error'}`);
-                        }
-                    }
-                });
-            } else {
-                console.warn("Cannot leave room: not connected to server");
-            }
-        });
+        console.log("Leave Room button exists and is ready", leaveRoomBtn);
     } else {
         console.error("Leave Room button not found in DOM");
     }
