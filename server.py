@@ -24,6 +24,8 @@ app = socketio.WSGIApp(sio)
 players = {}
 rooms = {}
 room_walls = {}  # Store walls for each room
+room_hosts = {}    # Store the host SID for each room
+game_started = {}  # Track whether game has started in each room
 
 # Expanded player colors for more than 2 players
 player_colors = [
@@ -365,7 +367,8 @@ def get_room_game_state(room_name):
                 'y': players[player_sid]['y'],
                 'color': players[player_sid]['color'],
                 'position_index': players[player_sid]['position_index'],  # Include position index
-                'username': players[player_sid]['username']  # Include username
+                'username': players[player_sid]['username'],  # Include username
+                'is_host': player_sid == room_hosts.get(room_name)  # Include host status
             }
     
     return game_state
@@ -411,7 +414,8 @@ def connect(sid, environ):
         'color': None,
         'size': PLAYER_SIZE,
         'position_index': -1,  # Will be set when joining a room
-        'username': None  # Will be set when joining a room
+        'username': None,  # Will be set when joining a room
+        'is_host': False  # Default to not a host
     }
 
 @sio.event
@@ -420,23 +424,8 @@ def disconnect(sid):
     if sid in players:
         room = players[sid]['room']
         if room and room in rooms:
-            # Remove player from the room
-            rooms[room].remove(sid)
-            print(f"Player {sid} removed from room {room}, {len(rooms[room])} players left")
-            
-            # Clean up room if empty
-            if not rooms[room]:
-                print(f"Room {room} is now empty, cleaning up")
-                del rooms[room]
-                if room in room_walls:
-                    del room_walls[room]
-            else:
-                # Notify other players that someone left
-                for player_sid in rooms[room]:
-                    sio.emit('player_left', {}, room=player_sid)
-                
-                # If room still has players, broadcast updated game state
-                broadcast_game_state(room)
+            # Handle as a leave_room action
+            leave_room(sid)
         
         # Clean up player data
         del players[sid]
@@ -452,10 +441,14 @@ def create_room(sid, data):
     if room_name in rooms:
         return {'success': False, 'message': 'Room already exists'}
     
-    # Create new room with this player as first member
+    # Create new room with this player as first member and host
     rooms[room_name] = [sid]
+    room_hosts[room_name] = sid  # Set creator as host
+    game_started[room_name] = False  # Game not started yet
+    
     players[sid]['room'] = room_name
     players[sid]['username'] = username  # Store the username
+    players[sid]['is_host'] = True  # Mark as host
     
     # Assign first position and color
     position_index, color_index = 0, 0  # First player gets first position/color
@@ -470,16 +463,12 @@ def create_room(sid, data):
     # Generate walls for this room
     room_walls[room_name] = generate_walls()
     
-    # Create initial game state with just this player
-    game_state = {
-        sid: {
-            'x': start_x,
-            'y': start_y,
-            'color': player_colors[color_index],
-            'position_index': position_index,
-            'username': username  # Include username in game state
-        }
-    }
+    # Create initial player list for waiting lobby
+    player_list = [{
+        'id': sid,
+        'username': username,
+        'is_host': True
+    }]
     
     print(f"Room '{room_name}' created by {username} (SID: {sid}, position {position_index})")
     
@@ -492,7 +481,9 @@ def create_room(sid, data):
         'x': start_x,
         'y': start_y,
         'position_index': position_index,
-        'game_state': game_state  # Include initial game state for immediate rendering
+        'is_host': True,
+        'player_list': player_list,
+        'game_started': False
     }
 
 @sio.event
@@ -506,10 +497,15 @@ def join_room(sid, data):
     if room_name not in rooms:
         return {'success': False, 'message': 'Room does not exist'}
     
+    # Check if the game has already started
+    if game_started.get(room_name, False):
+        return {'success': False, 'message': 'Game has already started'}
+    
     # Add player to room
     rooms[room_name].append(sid)
     players[sid]['room'] = room_name
     players[sid]['username'] = username  # Store the username
+    players[sid]['is_host'] = False  # Not a host
     
     # Determine position and color based on existing players
     position_index, color_index = get_next_player_position(room_name)
@@ -521,16 +517,21 @@ def join_room(sid, data):
     players[sid]['x'] = start_x
     players[sid]['y'] = start_y
     
-    # Generate a clean game state including this player
-    game_state = get_room_game_state(room_name)
-    
-    # Notify all other players that someone joined
+    # Generate player list for waiting lobby
+    player_list = []
     for player_sid in rooms[room_name]:
-        if player_sid != sid:
-            sio.emit('player_joined', {}, room=player_sid)
+        if player_sid in players:
+            player_list.append({
+                'id': player_sid,
+                'username': players[player_sid]['username'],
+                'is_host': player_sid == room_hosts.get(room_name)
+            })
     
-    # Push-based model: Immediately broadcast the updated game state to all players
-    broadcast_game_state(room_name)
+    # Notify all players in the room that someone joined
+    for player_sid in rooms[room_name]:
+        sio.emit('player_joined', {
+            'player_list': player_list
+        }, room=player_sid)
     
     print(f"Player {username} (SID: {sid}) joined room '{room_name}' as position {position_index} with {len(rooms[room_name])} total players")
     
@@ -543,8 +544,93 @@ def join_room(sid, data):
         'x': start_x,
         'y': start_y,
         'position_index': position_index,
-        'game_state': game_state  # Include current game state for immediate rendering
+        'is_host': False,
+        'player_list': player_list,
+        'game_started': False
     }
+
+@sio.event
+def leave_room(sid):
+    if sid not in players:
+        return {'success': False, 'message': 'Player not found'}
+    
+    room_name = players[sid]['room']
+    if not room_name or room_name not in rooms:
+        return {'success': False, 'message': 'Not in a room'}
+    
+    # Remove player from room
+    rooms[room_name].remove(sid)
+    is_host = sid == room_hosts.get(room_name)
+    
+    # If room is now empty, delete it
+    if len(rooms[room_name]) == 0:
+        del rooms[room_name]
+        if room_name in room_walls:
+            del room_walls[room_name]
+        if room_name in room_hosts:
+            del room_hosts[room_name]
+        if room_name in game_started:
+            del game_started[room_name]
+        print(f"Room {room_name} deleted - no players left")
+    else:
+        # Transfer host if current host is leaving
+        if is_host:
+            room_hosts[room_name] = rooms[room_name][0]  # Make the first player the new host
+            players[room_hosts[room_name]]['is_host'] = True
+            print(f"Host transferred to {players[room_hosts[room_name]]['username']}")
+        
+        # Generate updated player list
+        player_list = []
+        for player_sid in rooms[room_name]:
+            if player_sid in players:
+                player_list.append({
+                    'id': player_sid,
+                    'username': players[player_sid]['username'],
+                    'is_host': player_sid == room_hosts.get(room_name)
+                })
+        
+        # Notify remaining players that someone left and send updated player list
+        for player_sid in rooms[room_name]:
+            sio.emit('player_left', {
+                'player_list': player_list,
+                'new_host': room_hosts.get(room_name) if is_host else None
+            }, room=player_sid)
+    
+    # Reset player's room status
+    players[sid]['room'] = None
+    players[sid]['is_host'] = False
+    
+    print(f"Player {players[sid]['username']} left room {room_name}")
+    return {'success': True, 'message': 'Left room'}
+
+@sio.event
+def start_game(sid):
+    if sid not in players:
+        return {'success': False, 'message': 'Player not found'}
+    
+    room_name = players[sid]['room']
+    if not room_name or room_name not in rooms:
+        return {'success': False, 'message': 'Not in a room'}
+    
+    # Only host can start the game
+    if sid != room_hosts.get(room_name):
+        return {'success': False, 'message': 'Only the host can start the game'}
+    
+    # Mark game as started
+    game_started[room_name] = True
+    
+    # Generate game state
+    game_state = get_room_game_state(room_name)
+    
+    # Notify all players that the game is starting
+    for player_sid in rooms[room_name]:
+        sio.emit('game_started', {
+            'game_state': game_state,
+            'walls': room_walls.get(room_name, [])
+        }, room=player_sid)
+    
+    print(f"Game started in room {room_name} by host {players[sid]['username']}")
+    return {'success': True, 'message': 'Game started'}
 
 @sio.event
 def list_rooms(sid):

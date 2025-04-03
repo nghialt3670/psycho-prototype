@@ -1,5 +1,5 @@
 // Configuration
-const SERVER_URL = 'https://psycho.vuhuydiet.xyz:5000';
+const SERVER_URL = 'http://psycho.vuhuydiet.xyz:5000';
 
 // Canvas setup
 const canvas = document.getElementById('game-canvas');
@@ -14,10 +14,13 @@ const MAP_HEIGHT = 1800;
 // Game state
 let connected = false;
 let inLobby = true; // Start in lobby screen
+let inWaitingLobby = false; // New state for waiting lobby
 let inRoom = false;
 let roomName = "";
 let clientSid = null;
 let walls = [];
+let isHost = false; // Whether the player is the host
+let gameStarted = false; // Whether the game has started
 
 // Player settings
 const PLAYER_SIZE = 40;
@@ -92,6 +95,7 @@ document.addEventListener('keydown', (e) => {
 
 // DOM elements - Get references just once at startup
 const lobbyScreen = document.getElementById('lobby');
+const waitingLobbyScreen = document.getElementById('waiting-lobby'); // New waiting lobby screen
 const gameScreen = document.getElementById('game');
 const roomNameInput = document.getElementById('room-name');
 const usernameInput = document.getElementById('username'); // Add username input reference
@@ -99,13 +103,20 @@ const createRoomBtn = document.getElementById('create-room');
 const joinRoomBtn = document.getElementById('join-room');
 const connectionStatus = document.getElementById('connection-status');
 const currentRoomDisplay = document.getElementById('current-room');
+const lobbyRoomNameDisplay = document.getElementById('lobby-room-name'); // Room name in waiting lobby
+const waitingPlayersList = document.getElementById('waiting-players-list'); // List of waiting players
+const hostControls = document.getElementById('host-controls'); // Host-only controls
+const guestWaitingMessage = document.getElementById('guest-waiting-message'); // Guest waiting message
+const startGameBtn = document.getElementById('start-game'); // Start game button
+const leaveRoomBtn = document.getElementById('leave-room'); // Leave room button
 const playerCountDisplay = document.getElementById('player-count');
 const fpsDisplay = document.getElementById('fps');
 const pingDisplay = document.getElementById('ping');
 
 console.log("Initializing UI elements:", {
-    lobbyScreen, gameScreen, roomNameInput, usernameInput, createRoomBtn, joinRoomBtn,
-    connectionStatus, currentRoomDisplay, playerCountDisplay, fpsDisplay, pingDisplay
+    lobbyScreen, waitingLobbyScreen, gameScreen, roomNameInput, usernameInput,
+    createRoomBtn, joinRoomBtn, startGameBtn, leaveRoomBtn,
+    connectionStatus, currentRoomDisplay, lobbyRoomNameDisplay, waitingPlayersList
 });
 
 // =============================================
@@ -154,14 +165,24 @@ socket.on('game_state', (data) => {
 
 // Player joined event
 socket.on('player_joined', (data) => {
-    console.log("Player joined the room");
-    // Server will automatically push updated game state - nothing to do here
+    console.log("Player joined the room", data);
+    if (data && data.player_list) {
+        updatePlayerListUI(data.player_list);
+    }
 });
 
 // Player left event
 socket.on('player_left', (data) => {
-    console.log("Player left the room");
-    // Server will automatically push updated game state - nothing to do here
+    console.log("Player left the room", data);
+    if (data && data.player_list) {
+        updatePlayerListUI(data.player_list);
+        
+        // If host was transferred to this player
+        if (data.new_host === clientSid) {
+            isHost = true;
+            updateHostUI();
+        }
+    }
 });
 
 // Ping measurement
@@ -173,6 +194,28 @@ socket.on('pong', () => {
     }
 });
 
+socket.on('game_started', (data) => {
+    console.log("Game starting", data);
+    gameStarted = true;
+    
+    // Process game state if provided
+    if (data.game_state) {
+        processGameState(data.game_state);
+    }
+    
+    // Store walls if provided
+    if (data.walls) {
+        walls = data.walls;
+    }
+    
+    // Move from waiting lobby to game
+    inWaitingLobby = false;
+    inRoom = true;
+    
+    // Switch to game screen
+    showGame();
+});
+
 // =============================================
 // Game State Management
 // =============================================
@@ -182,7 +225,10 @@ function resetGameState() {
     
     // Reset game state
     inRoom = false;
+    inWaitingLobby = false;
     inLobby = true;
+    isHost = false;
+    gameStarted = false;
     
     // Clear remote player data
     for (const key in remotePositions) {
@@ -204,6 +250,7 @@ function resetGameState() {
     localPlayer.y = 0;
     localPlayer.color = null;
     localPlayer.positionIndex = -1;
+    localPlayer.username = "";
 }
 
 function processGameState(data) {
@@ -338,6 +385,30 @@ function showGame() {
         lobbyScreen.classList.add('hidden');
     } else {
         console.error("Screen elements not found!", lobbyScreen, gameScreen);
+    }
+}
+
+function showWaitingLobby() {
+    console.log("Showing waiting lobby screen");
+    if (lobbyScreen && waitingLobbyScreen && gameScreen) {
+        lobbyScreen.style.display = 'none';
+        lobbyScreen.classList.add('hidden');
+        
+        waitingLobbyScreen.style.display = 'flex';
+        waitingLobbyScreen.classList.remove('hidden');
+        
+        gameScreen.style.display = 'none';
+        gameScreen.classList.add('hidden');
+        
+        // Update room name display
+        if (lobbyRoomNameDisplay) {
+            lobbyRoomNameDisplay.textContent = roomName;
+        }
+        
+        // Update host/guest UI
+        updateHostUI();
+    } else {
+        console.error("Screen elements not found!", lobbyScreen, waitingLobbyScreen, gameScreen);
     }
 }
 
@@ -820,8 +891,6 @@ createRoomBtn.addEventListener('click', () => {
         }, (result) => {
             if (result && result.success) {
                 console.log("Room created successfully:", result);
-                inRoom = true;
-                inLobby = false;
                 
                 // Store local player data
                 if (Array.isArray(result.color)) {
@@ -830,6 +899,13 @@ createRoomBtn.addEventListener('click', () => {
                     localPlayer.color = result.color;
                 }
                 
+                // Set player as host
+                isHost = result.is_host;
+                
+                // Store state
+                inLobby = false;
+                inWaitingLobby = true;
+                
                 localPlayer.positionIndex = result.position_index || 0;
                 walls = result.walls || [];
                 playerX = result.x || 80;
@@ -837,13 +913,13 @@ createRoomBtn.addEventListener('click', () => {
                 localPlayer.x = playerX;
                 localPlayer.y = playerY;
                 
-                // Process initial game state if provided
-                if (result.game_state) {
-                    processGameState(result.game_state);
+                // Update player list if provided
+                if (result.player_list) {
+                    updatePlayerListUI(result.player_list);
                 }
                 
-                // Switch to game screen
-                showGame();
+                // Switch to waiting lobby screen
+                showWaitingLobby();
             } else {
                 alert(`Failed to create room: ${result?.message || 'Unknown error'}`);
             }
@@ -870,7 +946,15 @@ joinRoomBtn.addEventListener('click', () => {
         }, (result) => {
             if (result && result.success) {
                 console.log("Room joined successfully:", result);
-                inRoom = true;
+                
+                // Check if game has already started
+                if (result.game_started) {
+                    inRoom = true;
+                    gameStarted = true;
+                } else {
+                    inWaitingLobby = true;
+                }
+                
                 inLobby = false;
                 
                 // Store local player data
@@ -880,6 +964,9 @@ joinRoomBtn.addEventListener('click', () => {
                     localPlayer.color = result.color;
                 }
                 
+                // Set host status
+                isHost = result.is_host;
+                
                 localPlayer.positionIndex = result.position_index || 0;
                 walls = result.walls || [];
                 playerX = result.x || (MAP_WIDTH - 120);
@@ -887,13 +974,17 @@ joinRoomBtn.addEventListener('click', () => {
                 localPlayer.x = playerX;
                 localPlayer.y = playerY;
                 
-                // Process initial game state if provided
-                if (result.game_state) {
-                    processGameState(result.game_state);
+                // Update player list if provided
+                if (result.player_list) {
+                    updatePlayerListUI(result.player_list);
                 }
                 
-                // Switch to game screen
-                showGame();
+                // Switch to waiting lobby or game screen
+                if (result.game_started) {
+                    showGame();
+                } else {
+                    showWaitingLobby();
+                }
             } else {
                 alert(`Failed to join room: ${result?.message || 'Unknown error'}`);
             }
@@ -905,15 +996,56 @@ joinRoomBtn.addEventListener('click', () => {
     }
 });
 
+// Start game button (host only)
+startGameBtn.addEventListener('click', () => {
+    if (connected && inWaitingLobby && isHost) {
+        socket.emit('start_game', {}, (result) => {
+            if (result && result.success) {
+                console.log("Starting game:", result);
+                // Server will send game_started event to all players
+            } else {
+                alert(`Failed to start game: ${result?.message || 'Unknown error'}`);
+            }
+        });
+    }
+});
+
+// Leave room button
+leaveRoomBtn.addEventListener('click', () => {
+    if (connected && (inWaitingLobby || inRoom)) {
+        socket.emit('leave_room', {}, (result) => {
+            if (result && result.success) {
+                console.log("Left room:", result);
+                resetGameState();
+                showLobby();
+            } else {
+                alert(`Failed to leave room: ${result?.message || 'Unknown error'}`);
+            }
+        });
+    }
+});
+
 // Keyboard input
 document.addEventListener('keydown', (event) => {
     if (event.key in keys) {
         keys[event.key] = true;
     }
     
-    if (event.key === 'Escape' && inRoom) {
-        resetGameState();
-        showLobby();
+    if (event.key === 'Escape') {
+        if (inRoom) {
+            // If in game, return to waiting lobby
+            inRoom = false;
+            inWaitingLobby = true;
+            showWaitingLobby();
+        } else if (inWaitingLobby) {
+            // If in waiting lobby, leave room and return to main lobby
+            socket.emit('leave_room', {}, (result) => {
+                if (result && result.success) {
+                    resetGameState();
+                    showLobby();
+                }
+            });
+        }
     }
 });
 
@@ -932,4 +1064,41 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Start the game loop
     requestAnimationFrame(gameLoop);
-}); 
+});
+
+// New UI update functions
+function updatePlayerListUI(playerList) {
+    // Clear current list
+    waitingPlayersList.innerHTML = '';
+    
+    // Add each player to the list
+    playerList.forEach(player => {
+        const listItem = document.createElement('li');
+        listItem.textContent = player.username;
+        
+        // Add host badge if player is the host
+        if (player.is_host) {
+            const hostBadge = document.createElement('span');
+            hostBadge.className = 'host-badge';
+            hostBadge.textContent = 'HOST';
+            listItem.appendChild(hostBadge);
+        }
+        
+        waitingPlayersList.appendChild(listItem);
+    });
+    
+    // Update start game button state (if we're the host)
+    if (isHost && startGameBtn) {
+        startGameBtn.disabled = playerList.length < 1; // Enable if at least 1 player
+    }
+}
+
+function updateHostUI() {
+    if (isHost) {
+        hostControls.classList.remove('hidden');
+        guestWaitingMessage.classList.add('hidden');
+    } else {
+        hostControls.classList.add('hidden');
+        guestWaitingMessage.classList.remove('hidden');
+    }
+} 

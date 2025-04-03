@@ -24,6 +24,29 @@
             <div id="server-info">Server: <span id="server-url">Loading...</span></div>
         </div>
         
+        <!-- New waiting lobby screen -->
+        <div id="waiting-lobby" class="screen hidden">
+            <h2>Waiting Lobby: <span id="lobby-room-name"></span></h2>
+            <div class="waiting-container">
+                <div class="player-list">
+                    <h3>Players:</h3>
+                    <ul id="waiting-players-list">
+                        <!-- Player list will be populated here -->
+                    </ul>
+                </div>
+                <div class="waiting-info">
+                    <div id="host-controls" class="hidden">
+                        <p>You are the host</p>
+                        <button id="start-game" class="primary-button">Start Game</button>
+                    </div>
+                    <div id="guest-waiting-message">
+                        <p>Waiting for host to start the game...</p>
+                    </div>
+                    <button id="leave-room" class="secondary-button">Leave Room</button>
+                </div>
+            </div>
+        </div>
+        
         <div id="game" class="screen hidden">
             <canvas id="game-canvas" width="800" height="600"></canvas>
             <div id="game-info">
