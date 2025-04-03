@@ -8,24 +8,23 @@ This server implements a push-based multiplayer model:
 - This ensures all clients have the same view of the game state at all times
 """
 
-import os
 import socketio
+from aiohttp import web
 import eventlet
 from eventlet import wsgi
 import time
+from models.Player import Player
+from models.Room import Room
+from models.Vec2 import Vec2
 
 # Create a Socket.IO server
 sio = socketio.Server(cors_allowed_origins='*')
 app = socketio.WSGIApp(sio)
 
 # Game state
-players = {}         # Store player data by SID
-rooms = {}           # Store players in each room
-room_walls = {}      # Store walls for each room
-room_hosts = {}      # Store the host SID for each room
-game_started = {}    # Track whether game has started in each room
+players: dict[str, Player] = {}         # Store player data by SID
+rooms: dict[str, Room] = {}           # Store players in each room
 active_room_names = set()  # Track all active room names for proper cleanup
-room_creation_times = {}  # Track when rooms were created
 
 # Room cleanup settings
 ROOM_CLEANUP_INTERVAL = 60 * 60  # Clean up old empty rooms after 1 hour
@@ -362,18 +361,23 @@ def get_room_game_state(room_name):
     if room_name not in rooms:
         return {}
     
+    room = rooms[room_name]
+    
     # Create a clean game state with all players
-    game_state = {}
-    for player_sid in rooms[room_name]:
-        if player_sid in players:  # Make sure player still exists
-            game_state[player_sid] = {
-                'x': players[player_sid]['x'],
-                'y': players[player_sid]['y'],
-                'color': players[player_sid]['color'],
-                'position_index': players[player_sid]['position_index'],  # Include position index
-                'username': players[player_sid]['username'],  # Include username
-                'is_host': player_sid == room_hosts.get(room_name)  # Include host status
-            }
+    leaved_players = [sid for sid in room.get_players() if sid not in players]
+    for sid in leaved_players:
+        del players[sid]
+    
+    game_state: dict[str, dict] = {}
+    for i, player_sid in enumerate(room.get_players()):
+        game_state[player_sid] = {
+            'x': players[player_sid].position.x,
+            'y': players[player_sid].position.y,
+            'color': players[player_sid].color,
+            'position_index': i,  # Include position index
+            'username': players[player_sid].username,  # Include username
+            'is_host': player_sid == room.get_hostSid()  # Include host status
+        }
     
     return game_state
 
@@ -387,7 +391,7 @@ def broadcast_game_state(room_name):
     
     # Broadcast to all clients in the room - push-based model ensures
     # everyone gets the same state at the same time
-    for sid in rooms[room_name]:
+    for sid in rooms[room_name].get_players():
         sio.emit('game_state', game_state, room=sid)
 
 def get_next_player_position(room_name):
@@ -396,7 +400,7 @@ def get_next_player_position(room_name):
         return 0, 0
     
     # The position index is the same as the number of players already in the room
-    position_index = len(rooms[room_name]) - 1  # -1 because the player was already added to the room
+    position_index = rooms[room_name].get_num_players() - 1  # -1 because the player was already added to the room
     
     # Make sure we don't exceed our defined positions
     if position_index >= len(PLAYER_STARTS):
@@ -411,28 +415,21 @@ def get_next_player_position(room_name):
 
 @sio.event
 def connect(sid, environ):
-    players[sid] = {
-        'x': 0,  # Will be set when joining a room
-        'y': 0,
-        'room': None,
-        'color': None,
-        'size': PLAYER_SIZE,
-        'position_index': -1,  # Will be set when joining a room
-        'username': None,  # Will be set when joining a room
-        'is_host': False  # Default to not a host
-    }
+    players[sid] = Player(sid, Vec2(0, 0))
 
 @sio.event
 def disconnect(sid):
     print('Client disconnected:', sid)
-    if sid in players:
-        room = players[sid]['room']
-        if room and room in rooms:
-            # Handle as a leave_room action
-            leave_room(sid)
-        
-        # Clean up player data
-        del players[sid]
+    if sid not in players:
+        return
+
+    room_name = players[sid].room
+    if room_name and room_name in rooms:
+        # Handle as a leave_room action
+        leave_room(sid)
+    
+    # Clean up player data
+    del players[sid]
 
 @sio.event
 def create_room(sid, data):
@@ -446,29 +443,17 @@ def create_room(sid, data):
         return {'success': False, 'message': 'Room already exists'}
     
     # Create new room with this player as first member and host
-    rooms[room_name] = [sid]
-    room_hosts[room_name] = sid  # Set creator as host
-    game_started[room_name] = False  # Game not started yet
+    rooms[room_name] = Room(generate_walls(), sid)
     active_room_names.add(room_name)  # Add to active room names
-    room_creation_times[room_name] = time.time()  # Record creation time
     
-    players[sid]['room'] = room_name
-    players[sid]['username'] = username  # Store the username
-    players[sid]['is_host'] = True  # Mark as host
-    
-    # Assign first position and color
     position_index, color_index = 0, 0  # First player gets first position/color
-    players[sid]['position_index'] = position_index
-    players[sid]['color'] = player_colors[color_index]
-    
-    # Set starting position
     start_x, start_y = PLAYER_STARTS[position_index]
-    players[sid]['x'] = start_x
-    players[sid]['y'] = start_y
     
-    # Generate walls for this room
-    room_walls[room_name] = generate_walls()
-    
+    players[sid].position = Vec2(start_x, start_y)
+    players[sid].username = username  # Store the username
+    players[sid].color = player_colors[color_index]
+    players[sid].room = room_name
+        
     # Create initial player list for waiting lobby
     player_list = [{
         'id': sid,
@@ -483,7 +468,7 @@ def create_room(sid, data):
         'success': True, 
         'message': 'Room created', 
         'color': player_colors[color_index],
-        'walls': room_walls[room_name],
+        'walls': rooms[room_name].get_walls(),
         'x': start_x,
         'y': start_y,
         'position_index': position_index,
@@ -503,50 +488,46 @@ def join_room(sid, data):
     if room_name not in active_room_names:
         return {'success': False, 'message': 'Room does not exist'}
     
+    room = rooms[room_name]
+    
     # Check if the game has already started
-    if game_started.get(room_name, False):
+    if room.is_game_started():
         return {'success': False, 'message': 'Game has already started'}
     
     # Add player to room
-    rooms[room_name].append(sid)
-    players[sid]['room'] = room_name
-    players[sid]['username'] = username  # Store the username
-    players[sid]['is_host'] = False  # Not a host
-    
-    # Determine position and color based on existing players
     position_index, color_index = get_next_player_position(room_name)
-    players[sid]['color'] = player_colors[color_index]
-    players[sid]['position_index'] = position_index
-    
-    # Set starting position
     start_x, start_y = PLAYER_STARTS[position_index]
-    players[sid]['x'] = start_x
-    players[sid]['y'] = start_y
+
+    rooms[room_name].add_player(sid)
+    players[sid].room = room_name
+    players[sid].username = username  # Store the username
+    players[sid].color = player_colors[color_index]
+    players[sid] = Vec2(start_x, start_y)
     
     # Generate player list for waiting lobby
     player_list = []
-    for player_sid in rooms[room_name]:
+    for player_sid in rooms[room_name].get_players():
         if player_sid in players:
             player_list.append({
                 'id': player_sid,
                 'username': players[player_sid]['username'],
-                'is_host': player_sid == room_hosts.get(room_name)
+                'is_host': player_sid == rooms[room_name].get_hostSid()
             })
     
     # Notify all players in the room that someone joined
-    for player_sid in rooms[room_name]:
+    for player_sid in rooms[room_name].get_players():
         sio.emit('player_joined', {
             'player_list': player_list
         }, room=player_sid)
     
-    print(f"Player {username} (SID: {sid}) joined room '{room_name}' as position {position_index} with {len(rooms[room_name])} total players")
+    print(f"Player {username} (SID: {sid}) joined room '{room_name}' as position {position_index} with {rooms[room_name].get_num_players()} total players")
     
     # Return success with room data
     return {
         'success': True, 
         'message': 'Joined room', 
         'color': player_colors[color_index],
-        'walls': room_walls.get(room_name, []),
+        'walls': rooms[room_name].get_walls(),
         'x': start_x,
         'y': start_y,
         'position_index': position_index,
@@ -566,21 +547,21 @@ def leave_room(sid, data, callback=None):
             callback({'success': False, 'message': 'Player not found'})
         return {'success': False, 'message': 'Player not found'}
     
+    room_name = players[sid].room
+    
     # Check if player has a room value at all
-    if 'room' not in players[sid] or players[sid]['room'] is None:
+    if room_name == None:
         print(f"Player {sid} has no room assigned")
         if callback:
             callback({'success': True, 'message': 'Already left room'})
         return {'success': True, 'message': 'Already left room'}
     
-    room_name = players[sid]['room']
     print(f"Player {sid} attempting to leave room: {room_name}")
     
     if not room_name:
         # Player has empty room name - consider them already out of room
         print(f"Player {sid} has empty room name")
-        players[sid]['room'] = None
-        players[sid]['is_host'] = False
+        players[sid].room = None
         if callback:
             callback({'success': True, 'message': 'Already left room'})
         return {'success': True, 'message': 'Already left room'}
@@ -589,70 +570,53 @@ def leave_room(sid, data, callback=None):
     if room_name not in rooms:
         print(f"Room {room_name} does not exist")
         # Room doesn't exist - reset player's room status and return success
-        players[sid]['room'] = None
-        players[sid]['is_host'] = False
+        players[sid].room = None
         if callback:
             callback({'success': True, 'message': 'Room no longer exists'})
         return {'success': True, 'message': 'Room no longer exists'}
     
+    room = rooms[room_name]
+    
     # Check if player is actually in the room they're trying to leave
-    if sid not in rooms[room_name]:
+    if sid not in room.get_players():
         print(f"Player {sid} not found in room {room_name}")
         # Player not in the specified room - fix their state and return success
-        players[sid]['room'] = None
-        players[sid]['is_host'] = False
+        players[sid].room = None
         if callback:
             callback({'success': True, 'message': 'Already left room'})
         return {'success': True, 'message': 'Already left room'}
     
     # Remove player from room
-    rooms[room_name].remove(sid)
-    is_host = sid == room_hosts.get(room_name)
-    print(f"Removed player {sid} from room {room_name}, was host: {is_host}")
+    room.remove_player(sid)
     
     # If room is now empty, delete it and free the room name
-    if len(rooms[room_name]) == 0:
+    if room.get_num_players() == 0:
         del rooms[room_name]
-        if room_name in room_walls:
-            del room_walls[room_name]
-        if room_name in room_hosts:
-            del room_hosts[room_name]
-        if room_name in game_started:
-            del game_started[room_name]
         if room_name in active_room_names:
             active_room_names.remove(room_name)
-        if room_name in room_creation_times:
-            del room_creation_times[room_name]
         print(f"Room {room_name} deleted and name freed - no players left")
     else:
-        # Transfer host if current host is leaving
-        if is_host:
-            room_hosts[room_name] = rooms[room_name][0]  # Make the first player the new host
-            players[room_hosts[room_name]]['is_host'] = True
-            print(f"Host transferred to {players[room_hosts[room_name]]['username']}")
-        
         # Generate updated player list
         player_list = []
-        for player_sid in rooms[room_name]:
+        for player_sid in room.get_players():
             if player_sid in players:
                 player_list.append({
                     'id': player_sid,
                     'username': players[player_sid]['username'],
-                    'is_host': player_sid == room_hosts.get(room_name)
+                    'is_host': player_sid == room.get_hostSid()
                 })
         
         # Notify remaining players that someone left and send updated player list
-        for player_sid in rooms[room_name]:
+        for player_sid in room.get_players():
             sio.emit('player_left', {
                 'player_list': player_list,
-                'new_host': room_hosts.get(room_name) if is_host else None
+                'new_host': room.get_hostSid()
             }, room=player_sid)
     
     # Reset player's room status
-    players[sid]['room'] = None
-    players[sid]['is_host'] = False
+    players[sid].room = None
     
-    print(f"Player {sid} ({players[sid]['username'] if 'username' in players[sid] else 'unknown'}) successfully left room {room_name}")
+    print(f"Player {sid} ({players[sid].username}) successfully left room {room_name}")
     
     # Send success response via callback if provided
     if callback:
@@ -667,29 +631,30 @@ def start_game(sid, data, callback=None):
             callback({'success': False, 'message': 'Player not found'})
         return {'success': False, 'message': 'Player not found'}
     
-    room_name = players[sid]['room']
+    room_name = players[sid].room
     if not room_name or room_name not in rooms:
         if callback:
             callback({'success': False, 'message': 'Not in a room'})
         return {'success': False, 'message': 'Not in a room'}
     
     # Only host can start the game
-    if sid != room_hosts.get(room_name):
+    room = rooms[room_name]
+    if sid != room.get_hostSid():
         if callback:
             callback({'success': False, 'message': 'Only the host can start the game'})
         return {'success': False, 'message': 'Only the host can start the game'}
     
     # Mark game as started
-    game_started[room_name] = True
+    room.start_game()
     
     # Generate game state
     game_state = get_room_game_state(room_name)
     
     # Notify all players that the game is starting
-    for player_sid in rooms[room_name]:
+    for player_sid in rooms[room_name].get_players():
         sio.emit('game_started', {
             'game_state': game_state,
-            'walls': room_walls.get(room_name, [])
+            'walls': room.get_walls(),
         }, room=player_sid)
     
     print(f"Game started in room {room_name} by host {players[sid]['username']}")
@@ -705,7 +670,7 @@ def list_rooms(sid):
     room_info = {}
     for room in active_room_names:
         if room in rooms:
-            room_info[room] = len(rooms[room])
+            room_info[room] = rooms[room].get_num_players()
     return room_info
 
 @sio.event
@@ -714,25 +679,20 @@ def update_position(sid, data):
     if sid not in players:
         return {'success': False, 'message': 'Player not found'}
     
-    room_name = players[sid]['room']
+    room_name = players[sid].room
     if not room_name or room_name not in rooms:
         return {'success': False, 'message': 'Player not in a room'}
     
     # Update player position
     new_x = data.get('x')
     new_y = data.get('y')
-    velocity_x = data.get('vx', 0)
-    velocity_y = data.get('vy', 0)
     
     # Update username if provided
     if 'username' in data and data['username']:
-        players[sid]['username'] = data['username']
+        players[sid].username = data['username']
     
     if new_x is not None and new_y is not None:
-        players[sid]['x'] = new_x
-        players[sid]['y'] = new_y
-        players[sid]['vx'] = velocity_x
-        players[sid]['vy'] = velocity_y
+        players[sid].position = Vec2(new_x, new_y)
         
         # Push-based model: Broadcast updated game state to ALL players
         # This ensures everyone has the most current positions
@@ -743,14 +703,8 @@ def update_position(sid, data):
 @sio.event
 def ping(sid):
     """Respond to ping requests from clients"""
-    # Log ping requests to help with debugging
-    print(f"Received ping request from client {sid}")
-    # Return a more detailed response with timestamp
-    return {
-        "status": "pong",
-        "server_time": time.time(),
-        "message": "Ping response from server"
-    }
+    # Simply respond to the event, client will calculate ping based on round-trip time
+    return {"status": "pong"}
 
 # Function to clean up inactive rooms
 def cleanup_inactive_rooms():
@@ -761,24 +715,15 @@ def cleanup_inactive_rooms():
     rooms_to_clean = []
     for room_name in active_room_names.copy():
         # Check if room is empty
-        if room_name not in rooms or not rooms[room_name]:
+        if room_name in rooms and rooms[room_name].is_empty():
             # Check if room has been inactive for too long
-            if (room_name in room_creation_times and 
-                current_time - room_creation_times[room_name] > INACTIVE_ROOM_THRESHOLD):
+            if (current_time - rooms[room_name].get_creation_time() > INACTIVE_ROOM_THRESHOLD):
                 rooms_to_clean.append(room_name)
     
     # Clean up each identified room
     for room_name in rooms_to_clean:
         if room_name in rooms:
             del rooms[room_name]
-        if room_name in room_walls:
-            del room_walls[room_name]
-        if room_name in room_hosts:
-            del room_hosts[room_name]
-        if room_name in game_started:
-            del game_started[room_name]
-        if room_name in room_creation_times:
-            del room_creation_times[room_name]
         active_room_names.remove(room_name)
         print(f"Cleaned up inactive room: {room_name}")
 
