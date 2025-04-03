@@ -47,28 +47,26 @@ To deploy the game to a web server:
 
 There are multiple ways to configure the server URL:
 
-### 1. Edit Hardcoded Values (Recommended)
+### 1. Edit .env File (Recommended)
 
-The easiest way is to edit the hardcoded values in `config-loader.js`:
+The easiest way is to edit the `.env` file:
 
-```javascript
-window.ENV = {
-    // Server configuration
-    SERVER_URL: 'http://your-server-address:5000',
-    
-    // Game configuration
-    DEBUG: false,
-    
-    // Version information
-    VERSION: '1.0.0'
-};
+```
+# Server configuration
+SERVER_URL=http://your-server-address:5000
+
+# Game configuration
+DEBUG=false
+
+# Version information
+VERSION=1.0.0
 ```
 
-Simply change the `SERVER_URL` value to point to your game server.
+Make sure the `.env` file is accessible via HTTP from your web server.
 
 ### 2. URL Parameter
 
-You can also specify the server URL using a URL parameter without changing the code:
+You can also specify the server URL using a URL parameter:
 
 ```
 http://your-game-site.com/?server=http://your-server-address:5000
@@ -90,11 +88,12 @@ window.SERVER_CONFIG = {
 
 ## How the Configuration System Works
 
-The configuration system uses a simple priority order:
+The game loads configuration in the following order:
 
-1. Hardcoded values (lowest priority)
-2. URL parameters (override hardcoded values)
-3. Global SERVER_CONFIG variable (highest priority)
+1. Default values
+2. Values from the `.env` file
+3. URL parameters (override .env)
+4. Global SERVER_CONFIG variable (highest priority)
 
 This gives you flexibility for different deployment scenarios.
 

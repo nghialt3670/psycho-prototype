@@ -48,10 +48,10 @@ const localPlayer = {
     positionIndex: -1
 };
 
-// Remote players
-const remotePositions = {};
-const remotePlayerBuffer = {};
-const INTERPOLATION_DURATION = 200;
+// Remote player tracking - use simpler buffer approach to match client.py
+const remotePositions = {};  // Maps position_index -> player data
+const remotePlayerBuffer = {};  // position_index -> {current: {x,y}, target: {x,y}, last_update: time}
+const INTERPOLATION_DURATION = 200;  // ms to interpolate between positions
 
 // Key state
 const keys = {
@@ -72,6 +72,13 @@ let ping = 0;
 let lastPingTime = 0;
 const PING_INTERVAL = 2000; // Check ping every 2 seconds
 
+// Network/Simulation settings
+const POSITION_UPDATE_RATE = 33; // ~30 updates per second (was 50)
+const GAME_STATE_REQUEST_RATE = 150; // Request state more frequently (was 200)
+let lastPositionUpdateTime = 0;
+let lastStateRequestTime = 0;
+let serverTimeOffset = 0; // Estimated difference between client and server time
+
 // Socket.IO setup
 const socket = io(SERVER_URL);
 
@@ -87,6 +94,14 @@ const playerCountDisplay = document.getElementById('player-count');
 const fpsDisplay = document.getElementById('fps');
 const pingDisplay = document.getElementById('ping');
 
+// Network settings display
+let networkDebugEnabled = false;
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'F2') {
+        networkDebugEnabled = !networkDebugEnabled;
+    }
+});
+
 // Socket.IO event handlers
 socket.on('connect', () => {
     connected = true;
@@ -94,8 +109,8 @@ socket.on('connect', () => {
     inLobby = true;
     connectionStatus.textContent = 'Status: Connected';
     
-    // Start measuring ping
-    measurePing();
+    // Request a short burst of pings to establish server-client time difference
+    measurePingBurst();
 });
 
 socket.on('disconnect', () => {
@@ -117,26 +132,59 @@ socket.on('game_state', (data) => {
 
 socket.on('player_joined', (data) => {
     // Server will broadcast updated game state
+    // Immediately request fresh state to see new player
+    requestGameState();
 });
 
 socket.on('player_left', (data) => {
     // Server will broadcast updated game state
+    // Immediately request fresh state to update player list
+    requestGameState();
 });
 
-// Ping response handler
+// Ping response handler (no longer used in burst mode)
 socket.on('pong', () => {
-    // Calculate ping based on how long it took to get a response
-    const endTime = performance.now();
-    ping = Math.round(endTime - lastPingTime);
-    updatePingDisplay();
+    // Only used if server sends a broadcast pong (fallback)
+    if (lastPingTime > 0) {
+        const endTime = performance.now();
+        ping = Math.round(endTime - lastPingTime);
+        updatePingDisplay();
+    }
 });
+
+function measurePing() {
+    if (connected) {
+        lastPingTime = performance.now();
+        socket.emit('ping', {}, (response) => {
+            const endTime = performance.now();
+            ping = Math.round(endTime - lastPingTime);
+            updatePingDisplay();
+            
+            // Progressive adjustment of server time offset (weighted average)
+            // Give 80% weight to existing value, 20% to new measurement
+            serverTimeOffset = Math.round(serverTimeOffset * 0.8 + (ping / 2) * 0.2);
+            
+            // Schedule next ping measurement
+            setTimeout(measurePing, PING_INTERVAL);
+        });
+    }
+}
 
 // Game functions
 function resetGameState() {
     inRoom = false;
     inLobby = true;
-    Object.keys(remotePositions).forEach(key => delete remotePositions[key]);
-    Object.keys(remotePlayerBuffer).forEach(key => delete remotePlayerBuffer[key]);
+    
+    // Clear all remote player data
+    for (const key in remotePositions) {
+        delete remotePositions[key];
+    }
+    
+    // Clear interpolation buffer
+    for (const key in remotePlayerBuffer) {
+        delete remotePlayerBuffer[key];
+    }
+    
     walls = [];
     cameraX = 0;
     cameraY = 0;
@@ -147,14 +195,28 @@ function resetGameState() {
     localPlayer.positionIndex = -1;
 }
 
+// Request the full game state from server
+function requestGameState() {
+    if (connected && inRoom) {
+        socket.emit('get_game_state', {}, (result) => {
+            if (result && result.success && result.game_state) {
+                processGameState(result.game_state);
+            }
+        });
+    }
+}
+
 function processGameState(data) {
-    // Clear remote positions first to avoid ghost players
-    Object.keys(remotePositions).forEach(key => delete remotePositions[key]);
     const currentTime = performance.now();
     
     if (!data || typeof data !== 'object') {
         console.error("Received invalid game state data");
         return;
+    }
+    
+    // CRITICAL: Clear remote positions first to avoid ghost players
+    for (const key in remotePositions) {
+        delete remotePositions[key];
     }
     
     // Process all players from the received state
@@ -178,6 +240,10 @@ function processGameState(data) {
             
             const positionIndex = playerInfo.position_index;
             
+            // Convert color array to CSS color
+            const colorArray = playerInfo.color;
+            const cssColor = `rgb(${colorArray[0]}, ${colorArray[1]}, ${colorArray[2]})`;
+            
             // Update the remote player buffer for smooth interpolation
             if (!remotePlayerBuffer[positionIndex]) {
                 // First time seeing this player, initialize buffer
@@ -195,11 +261,11 @@ function processGameState(data) {
                 remotePlayerBuffer[positionIndex].lastUpdate = currentTime;
             }
             
-            // Store remote player data for rendering
+            // Store remote player data in standard position dict for rendering
             remotePositions[positionIndex] = {
                 x: playerInfo.x,
                 y: playerInfo.y,
-                color: playerInfo.color
+                color: cssColor
             };
         }
     });
@@ -226,14 +292,40 @@ function updatePingDisplay() {
     }
 }
 
-function measurePing() {
-    if (connected) {
-        lastPingTime = performance.now();
-        socket.emit('ping');
-        
-        // Schedule next ping measurement
-        setTimeout(measurePing, PING_INTERVAL);
+function measurePingBurst(sampleCount = 5) {
+    let samples = 0;
+    let totalOffset = 0;
+    
+    function samplePing() {
+        if (connected && samples < sampleCount) {
+            lastPingTime = performance.now();
+            socket.emit('ping', {}, (response) => {
+                const endTime = performance.now();
+                ping = Math.round(endTime - lastPingTime);
+                
+                // Update running average of server time offset
+                totalOffset += ping / 2;
+                samples++;
+                
+                // Schedule next sample
+                setTimeout(samplePing, 200);
+                
+                // Update display
+                updatePingDisplay();
+            });
+        } else {
+            // All samples collected, calculate average
+            if (samples > 0) {
+                serverTimeOffset = Math.round(totalOffset / samples);
+            }
+            
+            // Schedule regular ping measurement
+            setTimeout(measurePing, PING_INTERVAL);
+        }
     }
+    
+    // Start the burst sampling
+    samplePing();
 }
 
 function updateCamera() {
@@ -253,9 +345,9 @@ function worldToScreen(worldX, worldY) {
     };
 }
 
-function checkWallCollision(newX, newY) {
+function checkWallCollision(newX, newY, size) {
     // First check map boundaries
-    if (newX < 0 || newX > MAP_WIDTH - PLAYER_SIZE || newY < 0 || newY > MAP_HEIGHT - PLAYER_SIZE) {
+    if (newX < 0 || newX > MAP_WIDTH - size || newY < 0 || newY > MAP_HEIGHT - size) {
         return true;
     }
     
@@ -269,9 +361,9 @@ function checkWallCollision(newX, newY) {
         const wallHeight = wall.height || 50;
         
         if (newX < wallX + wallWidth &&
-            newX + PLAYER_SIZE > wallX &&
+            newX + size > wallX &&
             newY < wallY + wallHeight &&
-            newY + PLAYER_SIZE > wallY) {
+            newY + size > wallY) {
             return true;
         }
     }
@@ -317,13 +409,13 @@ function updateLocalPlayerPosition() {
     // Only consider it a move if position actually changed
     if (Math.abs(newX - origX) > 0.01 || Math.abs(newY - origY) > 0.01) {
         // Try moving in X direction only first
-        if (!checkWallCollision(newX, origY)) {
+        if (!checkWallCollision(newX, origY, PLAYER_SIZE)) {
             playerX = newX;
             moved = true;
         }
         
         // Then try moving in Y direction
-        if (!checkWallCollision(playerX, newY)) {
+        if (!checkWallCollision(playerX, newY, PLAYER_SIZE)) {
             playerY = newY;
             moved = true;
         }
@@ -336,8 +428,9 @@ function updateLocalPlayerPosition() {
     };
 }
 
-function updateRemotePlayerPositions(currentTime) {
-    Object.keys(remotePlayerBuffer).forEach(idx => {
+function updateRemotePlayers(currentTime) {
+    // Update interpolated positions for all remote players in buffer
+    for (const idx in remotePlayerBuffer) {
         const playerData = remotePlayerBuffer[idx];
         
         // Calculate how far we are through the interpolation
@@ -351,11 +444,11 @@ function updateRemotePlayerPositions(currentTime) {
             // Calculate interpolation progress (0 to 1)
             const progress = timeElapsed / INTERPOLATION_DURATION;
             
-            // Interpolate between current and target
+            // Simple linear interpolation between current and target
             playerData.current.x = playerData.current.x + (playerData.target.x - playerData.current.x) * progress;
             playerData.current.y = playerData.current.y + (playerData.target.y - playerData.current.y) * progress;
         }
-    });
+    }
 }
 
 function sendPositionUpdate(x, y) {
@@ -365,8 +458,18 @@ function sendPositionUpdate(x, y) {
             localPlayer.x = x;
             localPlayer.y = y;
             
-            // Send to server asynchronously
-            socket.emit('update_position', {x, y});
+            // Get more accurate time with the server offset
+            const clientTime = performance.now();
+            const estimatedServerTime = clientTime + serverTimeOffset;
+            
+            // Send to server asynchronously with metadata
+            socket.emit('update_position', {
+                x, 
+                y,
+                timestamp: estimatedServerTime,
+                client_time: clientTime,
+                ping: ping
+            });
         } catch (e) {
             console.error("Error sending position update:", e);
         }
@@ -511,6 +614,30 @@ function drawMiniMap() {
     ctx.fill();
 }
 
+function drawNetworkDebug() {
+    if (!networkDebugEnabled) return;
+    
+    const remotePlayerCount = Object.keys(remotePositions).length;
+    
+    const debugX = 10;
+    const debugY = SCREEN_HEIGHT - 100;
+    const lineHeight = 15;
+    
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(debugX, debugY, 300, 90);
+    
+    ctx.fillStyle = 'white';
+    ctx.font = '12px monospace';
+    ctx.fillText(`Ping: ${ping}ms | Server Time Offset: ${Math.round(serverTimeOffset)}ms`, debugX + 10, debugY + lineHeight);
+    ctx.fillText(`Remote Players: ${remotePlayerCount}`, debugX + 10, debugY + lineHeight * 2);
+    ctx.fillText(`Last Position Update: ${Math.round(performance.now() - lastPositionUpdateTime)}ms ago`, debugX + 10, debugY + lineHeight * 3);
+    ctx.fillText(`Last State Request: ${Math.round(performance.now() - lastStateRequestTime)}ms ago`, debugX + 10, debugY + lineHeight * 4);
+    
+    const updateRate = 1000 / POSITION_UPDATE_RATE;
+    const requestRate = 1000 / GAME_STATE_REQUEST_RATE;
+    ctx.fillText(`Update Rate: ${updateRate}ms | Request Rate: ${requestRate}ms`, debugX + 10, debugY + lineHeight * 5);
+}
+
 function drawGame() {
     // Clear the screen at the start of each frame
     ctx.fillStyle = WHITE;
@@ -527,7 +654,7 @@ function drawGame() {
     // Draw room info and player count handled by HTML elements
     currentRoomDisplay.textContent = roomName;
     
-    // Draw remote players
+    // Draw ONLY remote players using their interpolated positions
     for (const positionIndex in remotePositions) {
         // Skip players with same index as local
         if (parseInt(positionIndex) === localPlayer.positionIndex) {
@@ -540,9 +667,7 @@ function drawGame() {
             const interpolatedY = remotePlayerBuffer[positionIndex].current.y;
             
             const playerData = remotePositions[positionIndex];
-            if (playerData.color) {
-                drawPlayer(interpolatedX, interpolatedY, playerData.color, false);
-            }
+            drawPlayer(interpolatedX, interpolatedY, playerData.color, false);
         }
     }
     
@@ -553,12 +678,15 @@ function drawGame() {
     
     // Draw mini-map
     drawMiniMap();
+    
+    // Draw network debug info if enabled
+    if (networkDebugEnabled) {
+        drawNetworkDebug();
+    }
 }
 
 // Game loop
 let lastUpdateTime = 0;
-let lastPositionUpdateTime = 0;
-const POSITION_UPDATE_INTERVAL = 100;
 
 function gameLoop(currentTime) {
     // Calculate delta time
@@ -578,14 +706,20 @@ function gameLoop(currentTime) {
         // Handle player movement
         const movement = updateLocalPlayerPosition();
         
-        // Only send position updates periodically
-        if (movement.moved && connected && currentTime - lastPositionUpdateTime > POSITION_UPDATE_INTERVAL) {
+        // More frequent position updates when moving
+        if (movement.moved && connected && currentTime - lastPositionUpdateTime > POSITION_UPDATE_RATE) {
             sendPositionUpdate(movement.newX, movement.newY);
             lastPositionUpdateTime = currentTime;
         }
         
+        // Regularly request game state for accurate remote player positions
+        if (currentTime - lastStateRequestTime > GAME_STATE_REQUEST_RATE) {
+            requestGameState();
+            lastStateRequestTime = currentTime;
+        }
+        
         // Update interpolated positions for remote players
-        updateRemotePlayerPositions(currentTime);
+        updateRemotePlayers(currentTime);
         
         // Draw the game
         drawGame();
@@ -607,7 +741,13 @@ createRoomBtn.addEventListener('click', () => {
                 inLobby = false;
                 
                 // Store local player data
-                localPlayer.color = result.color;
+                // Make sure color is properly formatted as CSS color
+                if (Array.isArray(result.color)) {
+                    localPlayer.color = `rgb(${result.color[0]}, ${result.color[1]}, ${result.color[2]})`;
+                } else {
+                    localPlayer.color = result.color;
+                }
+                
                 localPlayer.positionIndex = result.position_index || 0;
                 walls = result.walls || [];
                 playerX = result.x || 80;
@@ -615,8 +755,10 @@ createRoomBtn.addEventListener('click', () => {
                 localPlayer.x = playerX;
                 localPlayer.y = playerY;
                 
-                // Reset remote player tracking
-                Object.keys(remotePositions).forEach(key => delete remotePositions[key]);
+                // Process initial game state if provided
+                if (result.game_state) {
+                    processGameState(result.game_state);
+                }
                 
                 // Show game screen
                 showGame();
@@ -638,7 +780,13 @@ joinRoomBtn.addEventListener('click', () => {
                 inLobby = false;
                 
                 // Store local player data
-                localPlayer.color = result.color;
+                // Make sure color is properly formatted as CSS color
+                if (Array.isArray(result.color)) {
+                    localPlayer.color = `rgb(${result.color[0]}, ${result.color[1]}, ${result.color[2]})`;
+                } else {
+                    localPlayer.color = result.color;
+                }
+                
                 localPlayer.positionIndex = result.position_index || 0;
                 walls = result.walls || [];
                 playerX = result.x || (MAP_WIDTH - 120);
@@ -646,8 +794,10 @@ joinRoomBtn.addEventListener('click', () => {
                 localPlayer.x = playerX;
                 localPlayer.y = playerY;
                 
-                // Reset remote player tracking
-                Object.keys(remotePositions).forEach(key => delete remotePositions[key]);
+                // Process initial game state if provided
+                if (result.game_state) {
+                    processGameState(result.game_state);
+                }
                 
                 // Show game screen
                 showGame();
@@ -659,13 +809,35 @@ joinRoomBtn.addEventListener('click', () => {
 });
 
 function showLobby() {
-    lobbyScreen.classList.remove('hidden');
-    gameScreen.classList.add('hidden');
+    console.log("Showing lobby screen");
+    if (lobbyScreen && gameScreen) {
+        lobbyScreen.style.display = 'flex';
+        lobbyScreen.classList.remove('hidden');
+        
+        gameScreen.style.display = 'none';
+        gameScreen.classList.add('hidden');
+        
+        console.log("Updated: Lobby:", lobbyScreen.className, lobbyScreen.style.display);
+        console.log("Updated: Game:", gameScreen.className, gameScreen.style.display);
+    } else {
+        console.error("Screen elements not found!", lobbyScreen, gameScreen);
+    }
 }
 
 function showGame() {
-    lobbyScreen.classList.add('hidden');
-    gameScreen.classList.remove('hidden');
+    console.log("Showing game screen");
+    if (lobbyScreen && gameScreen) {
+        gameScreen.style.display = 'flex';
+        gameScreen.classList.remove('hidden');
+        
+        lobbyScreen.style.display = 'none';
+        lobbyScreen.classList.add('hidden');
+        
+        console.log("Updated: Lobby:", lobbyScreen.className, lobbyScreen.style.display);
+        console.log("Updated: Game:", gameScreen.className, gameScreen.style.display);
+    } else {
+        console.error("Screen elements not found!", lobbyScreen, gameScreen);
+    }
 }
 
 // Keyboard input
@@ -686,6 +858,28 @@ document.addEventListener('keyup', (event) => {
     }
 });
 
+// Add a check at the beginning of the game function to ensure UI is correctly displayed
+document.addEventListener('DOMContentLoaded', function() {
+    console.log("DOM fully loaded");
+    
+    // Check that our UI elements are correctly initialized
+    if (!lobbyScreen) {
+        console.error("Lobby screen element not found!");
+        lobbyScreen = document.getElementById('lobby');
+    }
+    
+    if (!gameScreen) {
+        console.error("Game screen element not found!");
+        gameScreen = document.getElementById('game');
+    }
+    
+    // Log initial state
+    console.log("Initial lobby display:", lobbyScreen?.className);
+    console.log("Initial game display:", gameScreen?.className);
+    
+    // Force initial display state
+    showLobby();
+});
+
 // Initialize game
-showLobby();
 requestAnimationFrame(gameLoop); 
