@@ -15,17 +15,24 @@ from aiohttp import web
 import eventlet
 from eventlet import wsgi
 import json
+import time
 
 # Create a Socket.IO server
 sio = socketio.Server(cors_allowed_origins='*')
 app = socketio.WSGIApp(sio)
 
 # Game state
-players = {}
-rooms = {}
-room_walls = {}  # Store walls for each room
-room_hosts = {}    # Store the host SID for each room
-game_started = {}  # Track whether game has started in each room
+players = {}         # Store player data by SID
+rooms = {}           # Store players in each room
+room_walls = {}      # Store walls for each room
+room_hosts = {}      # Store the host SID for each room
+game_started = {}    # Track whether game has started in each room
+active_room_names = set()  # Track all active room names for proper cleanup
+room_creation_times = {}  # Track when rooms were created
+
+# Room cleanup settings
+ROOM_CLEANUP_INTERVAL = 60 * 60  # Clean up old empty rooms after 1 hour
+INACTIVE_ROOM_THRESHOLD = 2 * 60 * 60  # Consider rooms inactive after 2 hours
 
 # Expanded player colors for more than 2 players
 player_colors = [
@@ -438,13 +445,15 @@ def create_room(sid, data):
     if not room_name:
         return {'success': False, 'message': 'Room name is required'}
     
-    if room_name in rooms:
+    if room_name in active_room_names:
         return {'success': False, 'message': 'Room already exists'}
     
     # Create new room with this player as first member and host
     rooms[room_name] = [sid]
     room_hosts[room_name] = sid  # Set creator as host
     game_started[room_name] = False  # Game not started yet
+    active_room_names.add(room_name)  # Add to active room names
+    room_creation_times[room_name] = time.time()  # Record creation time
     
     players[sid]['room'] = room_name
     players[sid]['username'] = username  # Store the username
@@ -494,7 +503,7 @@ def join_room(sid, data):
     if not room_name:
         return {'success': False, 'message': 'Room name is required'}
     
-    if room_name not in rooms:
+    if room_name not in active_room_names:
         return {'success': False, 'message': 'Room does not exist'}
     
     # Check if the game has already started
@@ -567,7 +576,7 @@ def leave_room(sid, data, callback=None):
     rooms[room_name].remove(sid)
     is_host = sid == room_hosts.get(room_name)
     
-    # If room is now empty, delete it
+    # If room is now empty, delete it and free the room name
     if len(rooms[room_name]) == 0:
         del rooms[room_name]
         if room_name in room_walls:
@@ -576,7 +585,11 @@ def leave_room(sid, data, callback=None):
             del room_hosts[room_name]
         if room_name in game_started:
             del game_started[room_name]
-        print(f"Room {room_name} deleted - no players left")
+        if room_name in active_room_names:
+            active_room_names.remove(room_name)
+        if room_name in room_creation_times:
+            del room_creation_times[room_name]
+        print(f"Room {room_name} deleted and name freed - no players left")
     else:
         # Transfer host if current host is leaving
         if is_host:
@@ -654,9 +667,11 @@ def start_game(sid, data, callback=None):
 
 @sio.event
 def list_rooms(sid):
+    """List all available rooms that can be joined"""
     room_info = {}
-    for room, players_list in rooms.items():
-        room_info[room] = len(players_list)
+    for room in active_room_names:
+        if room in rooms:
+            room_info[room] = len(rooms[room])
     return room_info
 
 @sio.event
@@ -697,6 +712,47 @@ def ping(sid):
     # Simply respond to the event, client will calculate ping based on round-trip time
     return {"status": "pong"}
 
+# Function to clean up inactive rooms
+def cleanup_inactive_rooms():
+    """Clean up inactive rooms that have been empty for too long"""
+    current_time = time.time()
+    
+    # Find rooms that are empty and haven't been used for a while
+    rooms_to_clean = []
+    for room_name in active_room_names.copy():
+        # Check if room is empty
+        if room_name not in rooms or not rooms[room_name]:
+            # Check if room has been inactive for too long
+            if (room_name in room_creation_times and 
+                current_time - room_creation_times[room_name] > INACTIVE_ROOM_THRESHOLD):
+                rooms_to_clean.append(room_name)
+    
+    # Clean up each identified room
+    for room_name in rooms_to_clean:
+        if room_name in rooms:
+            del rooms[room_name]
+        if room_name in room_walls:
+            del room_walls[room_name]
+        if room_name in room_hosts:
+            del room_hosts[room_name]
+        if room_name in game_started:
+            del game_started[room_name]
+        if room_name in room_creation_times:
+            del room_creation_times[room_name]
+        active_room_names.remove(room_name)
+        print(f"Cleaned up inactive room: {room_name}")
+
+# Periodically run the cleanup function
+def start_cleanup_task():
+    """Start the periodic room cleanup task"""
+    while True:
+        eventlet.sleep(ROOM_CLEANUP_INTERVAL)
+        cleanup_inactive_rooms()
+
 if __name__ == '__main__':
+    # Start the room cleanup task in a background thread
+    eventlet.spawn(start_cleanup_task)
+    
     port = 5000
+    print(f"Server starting on port {port}")
     wsgi.server(eventlet.listen(('', port)), app) 
