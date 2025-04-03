@@ -1,8 +1,20 @@
+"""
+Multiplayer Game Server using Socket.IO
+
+This server implements a push-based multiplayer model:
+- The server maintains the authoritative game state
+- Every player movement or state change is broadcast to ALL players immediately
+- No pull requests needed - clients simply react to server broadcasts
+- This ensures all clients have the same view of the game state at all times
+"""
+
+import os
+import random
 import socketio
+from aiohttp import web
 import eventlet
 from eventlet import wsgi
 import json
-import random
 
 # Create a Socket.IO server
 sio = socketio.Server(cors_allowed_origins='*')
@@ -357,16 +369,18 @@ def get_room_game_state(room_name):
     
     return game_state
 
-def broadcast_game_state(room_name, exclude_sid=None):
-    """Send game state to all players in a room, optionally excluding one player"""
+def broadcast_game_state(room_name):
+    """Broadcast current game state to all players in the room"""
     if room_name not in rooms:
         return
     
+    # Get the current state of all players in this room
     game_state = get_room_game_state(room_name)
     
-    for player_sid in rooms[room_name]:
-        if player_sid in players:
-            sio.emit('game_state', game_state, room=player_sid)
+    # Broadcast to all clients in the room - push-based model ensures
+    # everyone gets the same state at the same time
+    for sid in rooms[room_name]:
+        sio.emit('game_state', game_state, room=sid)
 
 def get_next_player_position(room_name):
     """Get the next available player position and color index for a room"""
@@ -472,7 +486,7 @@ def create_room(sid, data):
         'x': start_x,
         'y': start_y,
         'position_index': position_index,
-        'game_state': game_state
+        'game_state': game_state  # Include initial game state for immediate rendering
     }
 
 @sio.event
@@ -501,13 +515,13 @@ def join_room(sid, data):
     # Generate a clean game state including this player
     game_state = get_room_game_state(room_name)
     
-    # Notify all other players that someone joined and send updated game state
+    # Notify all other players that someone joined
     for player_sid in rooms[room_name]:
         if player_sid != sid:
             sio.emit('player_joined', {}, room=player_sid)
     
-    # Broadcast game state to all OTHER players
-    broadcast_game_state(room_name, exclude_sid=sid)
+    # Push-based model: Immediately broadcast the updated game state to all players
+    broadcast_game_state(room_name)
     
     print(f"Player {sid} joined room '{room_name}' as position {position_index} with {len(rooms[room_name])} total players")
     
@@ -520,7 +534,7 @@ def join_room(sid, data):
         'x': start_x,
         'y': start_y,
         'position_index': position_index,
-        'game_state': game_state
+        'game_state': game_state  # Include current game state for immediate rendering
     }
 
 @sio.event
@@ -532,47 +546,31 @@ def list_rooms(sid):
 
 @sio.event
 def update_position(sid, data):
-    """Update a player's position"""
+    """Update player position and velocity"""
     if sid not in players:
         return {'success': False, 'message': 'Player not found'}
     
-    # Get new position
-    new_x = data.get('x', players[sid]['x'])
-    new_y = data.get('y', players[sid]['y'])
+    room_name = players[sid]['room']
+    if not room_name or room_name not in rooms:
+        return {'success': False, 'message': 'Player not in a room'}
     
-    # Get client metadata if available
-    client_time = data.get('client_time', None)
-    client_timestamp = data.get('timestamp', None)
-    client_ping = data.get('ping', 0)
+    # Update player position
+    new_x = data.get('x')
+    new_y = data.get('y')
+    velocity_x = data.get('vx', 0)
+    velocity_y = data.get('vy', 0)
     
-    # Validate room
-    room = players[sid]['room']
-    if not room or room not in rooms or sid not in rooms[room]:
-        return {'success': False, 'message': 'Not in a valid room'}
-    
-    # Update position (no collision detection on server - client handles this)
-    players[sid]['x'] = new_x
-    players[sid]['y'] = new_y
-    
-    # Always broadcast immediately without any filtering to ensure accuracy
-    broadcast_game_state(room)
-    
+    if new_x is not None and new_y is not None:
+        players[sid]['x'] = new_x
+        players[sid]['y'] = new_y
+        players[sid]['vx'] = velocity_x
+        players[sid]['vy'] = velocity_y
+        
+        # Push-based model: Broadcast updated game state to ALL players
+        # This ensures everyone has the most current positions
+        broadcast_game_state(room_name)
+            
     return {'success': True}
-
-@sio.event
-def get_game_state(sid, data=None):
-    """Request the current game state for the player's room"""
-    if sid not in players:
-        return {'success': False, 'message': 'Player not found'}
-    
-    room = players[sid]['room']
-    if not room or room not in rooms:
-        return {'success': False, 'message': 'Not in a room'}
-    
-    # Get the complete game state for this room
-    game_state = get_room_game_state(room)
-    
-    return {'success': True, 'game_state': game_state}
 
 @sio.event
 def ping(sid):
