@@ -3,9 +3,9 @@ from models.Vec2 import Vec2
 class Player:
   sid: str
   position: Vec2
-  username: str | None
-  color: str | None
-  room: str | None
+  username: str
+  color: str
+  room: str
   
   def __init__(self, sid: str, position: Vec2):
     self.sid = sid

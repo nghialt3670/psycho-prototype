@@ -4,7 +4,7 @@ from models.Player import Player
 
 class Room:
   __players: list[str]
-  __hostSid: str | None
+  __hostSid: str
   
   __walls: list
   __game_started: bool
