@@ -17,15 +17,14 @@ def get_room_game_state(room_name):
     #     del players[sid]
     
     game_state: dict[str, dict] = {}
-    for i, player_sid in enumerate(room.get_players()):
+    for player_sid in room.get_players():
         game_state[player_sid] = {
             'x': players[player_sid].position.x,
             'y': players[player_sid].position.y,
             'color': players[player_sid].color,
-            'position_index': i,  # Include position index
             'username': players[player_sid].username,  # Include username
             'is_host': player_sid == room.get_hostSid(),  # Include host status
-            'is_active': room.is_player_activated(player_sid),  # Include active status
+            'is_active': room.is_player_active(player_sid),  # Include active status
         }
     
     return game_state

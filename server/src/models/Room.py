@@ -2,7 +2,7 @@ import time
 
 class Room:
   __players: list[str]
-  __players_in_room: dict[str, bool]
+  __players_active: dict[str, bool]
   
   __hostSid: str
   
@@ -12,7 +12,7 @@ class Room:
   
   def __init__(self, walls, host_sid):
     self.__players = [host_sid]
-    self.__players_in_room = {host_sid: True}    
+    self.__players_active = {host_sid: True}    
     
     self.__hostSid = host_sid
     
@@ -28,44 +28,49 @@ class Room:
   
   def add_player(self, sid: str):
     self.__players.append(sid)
-    self.__players_in_room[sid] = True
+    self.__players_active[sid] = True
 
   def remove_player(self, sid: str):
-    if sid not in self.__players_in_room:
+    if sid not in self.__players_active:
       return
     
     self.__players.remove(sid)
-    del self.__players_in_room[sid]
+    del self.__players_active[sid]
     
     # If the player is the host, remove the room
     if sid == self.__hostSid:
       self.__hostSid = None
       for player_sid in self.__players:
-        if self.__players_in_room[player_sid]:
+        if self.__players_active[player_sid]:
           self.__hostSid = player_sid
           break
         
   def is_player_in_room(self, sid: str):
-    return sid in self.__players_in_room
+    return sid in self.__players_active
+  
+  def get_player_position_index(self, sid: str):
+    if sid not in self.__players:
+      return None
+    return self.__players.index(sid)
       
   def activate_player(self, sid: str):
     if sid not in self.__players:
       return
-    self.__players_in_room[sid] = True
+    self.__players_active[sid] = True
 
   def deactivate_player(self, sid: str):
     if sid not in self.__players:
       return
-    self.__players_in_room[sid] = False
+    self.__players_active[sid] = False
 
-  def is_player_activated(self, sid: str):
-    return sid in self.__players_in_room and self.__players_in_room[sid]
+  def is_player_active(self, sid: str):
+    return sid in self.__players_active and self.__players_active[sid]
   
   def get_num_players(self):  
     return len(self.__players)
   
   def get_num_active_players(self):
-    return len([sid for sid in self.__players if self.__players_in_room[sid]])
+    return len([sid for sid in self.__players if self.__players_active[sid]])
   
   def is_empty(self):
     return len(self.__players) == 0

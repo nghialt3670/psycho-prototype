@@ -7,7 +7,7 @@ import time
 MAX_PLAYERS = 8  # Maximum number of players in a room
 
 # Expanded player colors for more than 2 players
-player_colors = [
+PLAYER_COLORS = [
     (255, 0, 0),    # Red
     (0, 0, 255),    # Blue
     (0, 255, 0),    # Green
@@ -378,25 +378,22 @@ def register_lobby_events(sio):
         rooms[room_name] = Room(generate_walls(), sid)
         active_room_names.add(room_name)  # Add to active room names
         
-        position_index, color_index = 0, 0  # First player gets first position/color
-        start_x, start_y = PLAYER_STARTS[position_index]
-        
+        start_x, start_y = PLAYER_STARTS[0]
         players[sid].position = Vec2(start_x, start_y)
         players[sid].username = username  # Store the username
-        players[sid].color = player_colors[color_index]
+        players[sid].color = PLAYER_COLORS[0]
         players[sid].room = room_name
         
-        print(f"Room '{room_name}' created by {username} (SID: {sid}, position {position_index})")
+        print(f"Room '{room_name}' created by {username} (SID: {sid}, position {0})")
         
         # Return success with room data
         return {
             'success': True, 
             'message': 'Room created', 
-            'color': player_colors[color_index],
+            'color': PLAYER_COLORS[0],
             'walls': rooms[room_name].get_walls(),
             'x': start_x,
             'y': start_y,
-            'position_index': position_index,
             'is_host': True,
             'player_list': get_player_list(rooms[room_name]),
             'game_started': False
@@ -425,14 +422,13 @@ def register_lobby_events(sio):
             sio.enter_room(sid, room_name)
         elif not room.is_game_started():
             # Add player to room
-            
             current_player_count = room.get_num_players()
             if current_player_count >= MAX_PLAYERS:
                 return {'success': False, 'message': 'Room is full'}
 
             start_x, start_y = PLAYER_STARTS[current_player_count]
             players[sid].position = Vec2(start_x, start_y)
-            players[sid].color = player_colors[current_player_count]
+            players[sid].color = PLAYER_COLORS[current_player_count]
             players[sid].room = room_name
             players[sid].username = username
             room.add_player(sid)
@@ -444,13 +440,13 @@ def register_lobby_events(sio):
                 'player_list': player_list,
             }, room=room_name)
         
-        print(f"Player {username} (SID: {sid}) joined room '{room_name}' as position {current_player_count} with {room.get_num_players()} total players")
+        print(f"Player {username} (SID: {sid}) joined room '{room_name}' as position {room.get_player_position_index(sid)} with {room.get_num_players()} total players")
         
         # Return success with room data
         return {
             'success': True, 
             'message': 'Joined room', 
-            'color': player_colors[current_player_count],
+            'color': PLAYER_COLORS[current_player_count],
             'walls': rooms[room_name].get_walls(),
             'x': start_x,
             'y': start_y,
@@ -570,7 +566,7 @@ def register_lobby_events(sio):
             'walls': room.get_walls(),
         }, room=room_name)
         
-        print(f"Game started in room {room_name} by host {players[sid]['username']}")
+        print(f"Game started in room {room_name} by host {players[sid].username}")
         
         # Send success response via callback
         if callback:
