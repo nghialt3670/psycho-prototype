@@ -264,15 +264,15 @@ function processGameState(data) {
     
     // Process all players from the game state
     Object.entries(data).forEach(([sid, playerInfo]) => {
-        // Skip our own player by checking SID
-        if (sid === clientSid) {
-            return;
-        }
+        // // Skip our own player by checking SID
+        // if (sid === clientSid) {
+        //     return;
+        // }
         
-        // Skip any player with same position index as local player
-        if (playerInfo && playerInfo.position_index === localPlayer.positionIndex) {
-            return;
-        }
+        // // Skip any player with same position index as local player
+        // if (playerInfo && playerInfo.position_index === localPlayer.positionIndex) {
+        //     return;
+        // }
         
         // Ensure valid player data
         if (playerInfo && 
