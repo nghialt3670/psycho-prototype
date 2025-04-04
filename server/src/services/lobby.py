@@ -418,12 +418,14 @@ def register_lobby_events(sio):
         if room.is_game_started() and not room.is_player_in_room(sid):
             return {'success': False, 'message': 'Game already started'}
         
-        player_list = get_player_list(room)
         # Check if the game has already started
+        player_list = get_player_list(room)
         if room.is_game_started() and room.is_player_in_room(sid):
             room.activate_player(sid)
+            sio.enter_room(sid, room_name)
         elif not room.is_game_started():
             # Add player to room
+            
             current_player_count = room.get_num_players()
             if current_player_count >= MAX_PLAYERS:
                 return {'success': False, 'message': 'Room is full'}
@@ -434,7 +436,7 @@ def register_lobby_events(sio):
             players[sid].room = room_name
             players[sid].username = username
             room.add_player(sid)
-            new_player_count = current_player_count + 1
+            player_list = get_player_list(room)
             
             # Notify all players in the room that someone joined
             sio.enter_room(sid, room_name)
@@ -442,7 +444,7 @@ def register_lobby_events(sio):
                 'player_list': player_list,
             }, room=room_name)
         
-        print(f"Player {username} (SID: {sid}) joined room '{room_name}' as position {current_player_count} with {new_player_count} total players")
+        print(f"Player {username} (SID: {sid}) joined room '{room_name}' as position {current_player_count} with {room.get_num_players()} total players")
         
         # Return success with room data
         return {
@@ -522,13 +524,14 @@ def register_lobby_events(sio):
                 if room_name in active_room_names:
                     active_room_names.remove(room_name)
                 print(f"Room {room_name} deleted and name freed - no players left")
-
-            player_list = get_player_list(room)
-            sio.emit('player_left', {
-                'player_list': player_list,
-                'new_host': room.get_hostSid()
-            }, room=room_name)
-            sio.leave_room(sid, room_name)
+            else:
+                player_list = get_player_list(room)
+                sio.emit('player_left', {
+                    'player_list': player_list,
+                    'new_host': room.get_hostSid()
+                }, room=room_name)
+            
+        sio.leave_room(sid, room_name)
                 
         
         print(f"Player {sid} ({players[sid].username}) successfully left room {room_name}")
