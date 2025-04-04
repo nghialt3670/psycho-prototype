@@ -9,7 +9,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy server code
-COPY ./src/server.py .
+COPY ./src ./src
 
 # Expose port for the server
 EXPOSE 5000

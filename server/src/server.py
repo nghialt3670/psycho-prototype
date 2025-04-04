@@ -8,17 +8,16 @@ This server implements a push-based multiplayer model:
 - This ensures all clients have the same view of the game state at all times
 """
 
-import socketio
-from aiohttp import web
 import eventlet
 from eventlet import wsgi
 import time
+import socketio
+from services.sio import sio
 from models.Player import Player
 from models.Room import Room
 from models.Vec2 import Vec2
 
 # Create a Socket.IO server
-sio = socketio.Server(cors_allowed_origins='*')
 app = socketio.WSGIApp(sio)
 
 # Game state
